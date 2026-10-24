@@ -503,7 +503,8 @@ export const register: Register = (on, options) => {
   })
 
   // A server-side review tool never reaches tool.call: it shows only in the assistant's rows.
-  on('session.append', async ($, e, next) => {
+  // Only response rows carry them. A managed plugin may pass user plugins over on other doors.
+  on('session.append', { door: 'response' }, async ($, e, next) => {
     if (!e.agentId && e.message.type === 'assistant') {
       const a = await getArchitect($)
       // Consults this row opened: their result may be in the same row, after the stale read above.
