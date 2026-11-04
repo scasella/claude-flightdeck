@@ -452,7 +452,8 @@ export const register: Register = (on, options) => {
     // Any compaction reaching this hook, a subagent's or a precompute too, means the guard isn't in the way.
     if (!(await getUsage($)).isCompactHooked) await update($, usage, x => afterCompactHooked(normalize(DEFAULT_USAGE, x)))
     const done = await next(e)
-    if (!e.agentId && e.trigger !== 'precompute') {
+    // A skip is a veto, by a plugin or a blocking PreCompact hook: the conversation stays as it was.
+    if (!done.skip && !e.agentId && e.trigger !== 'precompute') {
       const now = await $.clock.now()
       await update($, usage, x => {
         const u = normalize(DEFAULT_USAGE, x)
