@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Under a Team or Enterprise login, or on a machine with managed settings, the session no longer shows `flightdeck: its session.append hook was skipped`. The hook now takes only the response rows it reads, not the attachment, hook-context and compaction rows that Claude Code's built-in guard keeps from user plugins. ([#21](https://github.com/scasella/claude-flightdeck/pull/21), thanks @jeanfbrito; [#23](https://github.com/scasella/claude-flightdeck/issues/23), thanks @guglielmo)
+- README: Troubleshooting says what that guard costs Flightdeck. It never runs a user plugin's `classic.*` or `session.compact` hooks, so the permission mode shows only from a subagent's start and compactions aren't counted. ([#23](https://github.com/scasella/claude-flightdeck/issues/23))
+
 ## 0.5.1
 
 - The main box's `last req` line shows only the time to first token. Its tokens per second divided the reported output tokens, which include thinking, by the time from the first streamed piece, so when thinking wasn't streamed it read thousands of tokens a second. It is gone rather than wrong. ([#19](https://github.com/scasella/claude-flightdeck/pull/19))

@@ -376,6 +376,31 @@ test('the server-side advisor is read from assistant rows: consulting, then on c
   await after.unmount()
 })
 
+// The built-in guard passes user plugins over on the attachment, hook-context and compaction doors,
+// so the hook subscribes to the response door alone, which is where the assistant's rows come in.
+test('the server-side advisor is read only from rows that come in by the response door', async ($, on) => {
+  engine(on)
+  await $.turn.start({ text: 'plan it', turnId: 'T5' })
+  const row = (door: 'response' | 'hook-context', id: string) =>
+    $.session
+      .append({
+        message: { type: 'assistant', role: 'assistant', content: [{ type: 'server_tool_use', id, name: 'advisor', input: {} }] as never },
+        door,
+        origin: { kind: 'model', model: 'claude-opus-5-5' } as never,
+        uuid: `u${++spawnN}`,
+      })
+      .catch(() => undefined) // the test has no transcript to store rows in
+  await row('hook-context', 'srvH')
+  const before = await $.ui.mount({ ...pane(64), surface: 'terminal' })
+  expect(await before.find({ text: /ARCHITECT · advising/ })).toBeUndefined()
+  await before.unmount()
+
+  await row('response', 'srvR')
+  const after = await $.ui.mount({ ...pane(64), surface: 'terminal' })
+  expect(await after.find({ text: /ARCHITECT · advising/ })).toBeDefined()
+  await after.unmount()
+})
+
 test('the gate strip fills from checks and a row opens its redacted drill-down', async ($, on) => {
   engine(on)
   on('tool.check', (_$, e) => ({ decision: e.tool === 'Read' ? 'allow' : 'ask' }))
