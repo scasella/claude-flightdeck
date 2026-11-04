@@ -3,7 +3,8 @@
 ## Unreleased
 
 - Under a Team or Enterprise login, or on a machine with managed settings, the session no longer shows `flightdeck: its session.append hook was skipped`. The hook now takes only the response rows it reads, not the attachment, hook-context and compaction rows that Claude Code's built-in guard keeps from user plugins. ([#21](https://github.com/scasella/claude-flightdeck/pull/21), thanks @jeanfbrito; [#23](https://github.com/scasella/claude-flightdeck/issues/23), thanks @guglielmo)
-- README: Troubleshooting says what that guard costs Flightdeck. It never runs a user plugin's `classic.*` or `session.compact` hooks, so the permission mode shows only from a subagent's start and compactions aren't counted. ([#23](https://github.com/scasella/claude-flightdeck/issues/23))
+- README: Troubleshooting says what that guard costs Flightdeck. It never runs a user plugin's `classic.*` or `session.compact` hooks, so the permission mode shows only from a subagent's start. ([#23](https://github.com/scasella/claude-flightdeck/issues/23))
+- Under that guard, compactions are estimated rather than left at zero. Claude Code reports no context fill until the first response after a compaction, so a main-loop request that finds none after a response came back counts as one. The main box marks the count `⟲~`, with `(estimated)` when there's room, and the log says `context compacted (estimated)`. Wherever `session.compact` runs, its count replaces the estimate. A rewind to the first prompt also counts. ([#23](https://github.com/scasella/claude-flightdeck/issues/23), thanks @guglielmo)
 
 ## 0.5.1
 

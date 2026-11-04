@@ -840,6 +840,89 @@ test('a compaction-window read is claimed once per model window, missed reads re
   expect(forgetCompactRead({ ...u, compactWindow: 400_000 }).compactWindow).toBe(null)
 })
 
+// Claude Code's built-in guard keeps session.compact from user plugins. Claude Code reports no fill
+// until the first response after a new session, a /clear or a compaction, so a main-loop request that
+// finds none after a response came back follows a compaction: counted, marked as an estimate.
+const fillHost = ($: Parameters<TestBody>[0], on: On) => {
+  engine(on)
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  on('session.compact', (_$, e) => ({ messages: e.messages }))
+  let fill: number | undefined
+  on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { window: 1_000_000, ...(fill !== undefined ? { tokens: fill } : {}) } } }))
+  const usage = { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 60_000, cache_creation_input_tokens: 0, model: 'x' }
+  on('turn.step', async function* () {
+    return { turnId: 'C1', index: 0, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage }
+  })
+  return {
+    /** One model request: the fill Claude Code reports as it goes out, then its response. */
+    request: async (tokens: number | undefined, agentId?: string) => {
+      fill = tokens
+      const s = $.turn.step({ turnId: 'C1', index: 0, model: 'claude-opus-5-5', messageCount: 1, ...(agentId ? { agentId } : {}) })
+      for await (const _ of s) void _
+      await s.result
+    },
+    measure: (tokens: number) => $.session.measure({ context: { window: 1_000_000, tokens, percent: tokens / 10_000 }, rateLimits: [], changed: ['context'] }),
+    /** The compaction mark the main box shows, whether it says `(estimated)`, and how many log lines say compacted. */
+    shown: async () => {
+      const ui = await $.ui.mount({ ...pane(64), surface: 'terminal' })
+      const mark = (await ui.find({ type: 'Text', text: /^⟲/ }))?.text ?? null
+      const isEstimated = (await ui.find({ type: 'Text', text: /^\(estimated\)$/ })) !== undefined
+      const logged = (await ui.findAll({ type: 'Text', text: /^context compacted/ })).map(n => n.text)
+      await ui.unmount()
+      return { mark, isEstimated, logged }
+    },
+  }
+}
+
+test('under the built-in guard a request that finds the context emptied counts an estimated compaction', async ($, on) => {
+  const h = fillHost($, on)
+  await h.measure(60_000)
+  await h.request(undefined) // a new session's first request: nothing to have emptied
+  await h.request(60_000)
+  expect(await h.shown()).toEqual({ mark: null, isEstimated: false, logged: [] })
+  await h.request(undefined)
+  expect(await h.shown()).toEqual({ mark: '⟲~1', isEstimated: true, logged: ['context compacted (estimated)'] })
+  // Compacted again after one response, as auto-compaction can within a turn; a subagent's own window is not the main one.
+  await h.request(undefined)
+  await h.request(undefined, 'sub1')
+  expect((await h.shown()).mark).toBe('⟲~2')
+  // The label is left out where the line is short; nothing spills.
+  const spills: string[] = []
+  for (const surface of ['terminal', 'desktop'] as const) {
+    for (const cols of [24, 28, 32, 36, 40, 64, 120]) {
+      for (const placement of ['dock', 'inline'] as const) {
+        const ui = await $.ui.mount({ ...pane(cols), props: { ...pane(cols).props, placement }, surface })
+        for (const s of spillsOf(await ui.drawn(), cols)) spills.push(`${surface} ${placement} ${cols}: ${s}`)
+        await ui.unmount()
+      }
+    }
+  }
+  expect(spills).toEqual([])
+  // A /clear empties the context too, and isn't a compaction.
+  await $.session.end({ reason: 'clear', sessionId: 's' } as never)
+  await h.request(undefined)
+  await h.measure(30_000)
+  expect((await h.shown()).mark).toBe('⟲~2')
+  // So can a /resume into another conversation, before its first response.
+  await $.session.end({ reason: 'resume', sessionId: 's' } as never)
+  await h.request(undefined)
+  expect((await h.shown()).mark).toBe('⟲~2')
+})
+
+test('once session.compact reaches Flightdeck its count is the real one: estimates before it are dropped, none after', async ($, on) => {
+  const h = fillHost($, on)
+  await h.measure(60_000)
+  await h.request(60_000)
+  await h.request(undefined) // a rewind to the first prompt reads like a compaction
+  expect((await h.shown()).mark).toBe('⟲~1')
+  await $.session.compact({ trigger: 'auto', messages: [{ role: 'user', text: 'the summary', toolUses: [] }] })
+  await h.request(undefined)
+  await h.request(60_000)
+  await h.request(undefined)
+  expect(await h.shown()).toEqual({ mark: '⟲1', isEstimated: false, logged: ['context compacted (estimated)', 'context compacted (auto)'] })
+})
+
 test("a surface module's fault key is the same for the hook's path, either separator, and the drawing's name", () => {
   expect(faultKey('desktop', 'hooks/rail.tsx')).toBe('desktop:rail.tsx')
   expect(faultKey('desktop', 'hooks\\rail.tsx')).toBe(faultKey('desktop', 'rail.tsx'))

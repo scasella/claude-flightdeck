@@ -37,6 +37,9 @@ export const DEFAULT_USAGE: Usage = {
   limits: [],
   compactions: 0,
   lastCompactAt: null,
+  isCompactEstimate: false,
+  isCompactHooked: false,
+  hasFill: false,
 }
 export const DEFAULT_ARCHITECT: Architect = { consults: [], ids: [], seen: [], lastAdvice: '' }
 const ZERO: Tally = { rule: 0, ask: 0, cleared: 0, deny: 0 }
@@ -292,6 +295,36 @@ export const afterCompactRead = (
 
 /** A new main-loop model may compact in another window (`modelSettings`): read afresh at the next measurement. */
 export const forgetCompactRead = (u: Usage): Usage => ({ ...u, compactWindow: null, compactFor: 0, compactMisses: 0 })
+
+/**
+ * A main-loop request about to go out, and whether `$.session.usage()` reports a fill for it. Claude Code
+ * reports none until the first response after a new session, a /clear or a compaction. So no fill after a
+ * response came back means the context was compacted (a /clear resets `hasFill` before this). It counts as an
+ * estimate, and only until session.compact reaches Flightdeck, whose count is the real one.
+ */
+export const afterFillRead = (u: Usage, hasFill: boolean, now: number): { usage: Usage; isCompaction: boolean } => {
+  if (hasFill) return { usage: u.hasFill ? u : { ...u, hasFill: true }, isCompaction: false }
+  if (!u.hasFill) return { usage: u, isCompaction: false }
+  if (u.isCompactHooked) return { usage: { ...u, hasFill: false }, isCompaction: false }
+  return {
+    usage: { ...u, hasFill: false, compactions: u.compactions + 1, lastCompactAt: now, isCompactEstimate: true },
+    isCompaction: true,
+  }
+}
+
+/** A main-loop response came back: the context has a fill until the next compaction. */
+export const afterResponse = (u: Usage): Usage => (u.hasFill ? u : { ...u, hasFill: true })
+
+/**
+ * session.compact reached Flightdeck, so the guard isn't in the way and every compaction will reach it.
+ * An estimate made before it was something else (a rewind to the first prompt reads the same): dropped.
+ */
+export const afterCompactHooked = (u: Usage): Usage =>
+  u.isCompactHooked ? u : { ...u, isCompactHooked: true, ...(u.isCompactEstimate ? { compactions: 0, lastCompactAt: null, isCompactEstimate: false } : {}) }
+
+/** The compaction count as the pane marks it: `⟲2`, or `⟲~2` when estimated; empty before the first. */
+export const compactMark = (u: Pick<Usage, 'compactions' | 'isCompactEstimate'>) =>
+  u.compactions > 0 ? `⟲${u.isCompactEstimate ? '~' : ''}${u.compactions}` : ''
 
 /** A gauge of `width` cells: ▰ filled, ▱ empty. */
 export const gauge = (pct: number, width: number) => {

@@ -20,8 +20,12 @@ import {
   cellWidth,
   piecesThatFit,
   cardTitle,
+  afterCompactHooked,
   afterCompactRead,
+  afterFillRead,
+  afterResponse,
   claimCompactRead,
+  compactMark,
   contextFill,
   faultKey,
   forgetCompactRead,
@@ -259,6 +263,7 @@ export const register: Register = (on, options) => {
         window: u.context.window,
         compactFor: resumedWindow,
         compactMisses: 0,
+        hasFill: u.context.tokens !== undefined,
         costUsd: u.cost?.usd ?? null,
         limits: u.rateLimits.map(limitOf),
       }))
@@ -278,6 +283,8 @@ export const register: Register = (on, options) => {
       await resetAll($)
       await refreshStatus($, cfg)
     }
+    // The process goes on in another conversation, whose first request may find no fill: no compaction.
+    if (e.reason === 'clear' || e.reason === 'resume') await update($, usage, x => ({ ...normalize(DEFAULT_USAGE, x), hasFill: false }))
     return next(e)
   })
 
@@ -350,6 +357,23 @@ export const register: Register = (on, options) => {
         return { ...x, model: e.model, effort: String(e.effort ?? x.effort), steps: x.steps + 1 }
       })
       if (isNewModel) await update($, usage, x => forgetCompactRead(normalize(DEFAULT_USAGE, x)))
+      // Under the built-in guard session.compact never runs here. A request that finds the context
+      // emptied after a response came back follows a compaction: counted as an estimate (afterFillRead).
+      const [u0, live, at] = await Promise.all([getUsage($), $.session.usage().catch(() => null), $.clock.now()])
+      let hasFill = u0.hasFill
+      if (live) {
+        const read = afterFillRead(u0, live.context.tokens !== undefined, at)
+        hasFill = read.usage.hasFill
+        let isCompaction = false
+        if (read.usage !== u0) {
+          await update($, usage, x => {
+            const r = afterFillRead(normalize(DEFAULT_USAGE, x), live.context.tokens !== undefined, at)
+            isCompaction = r.isCompaction
+            return r.usage
+          })
+        }
+        if (isCompaction) await say($, 'main', 'context compacted (estimated)')
+      }
       // Time the response as it passes: its first piece that is neither the engine's envelope nor the
       // stop. One clock read in the stream and nothing stored until it has ended.
       const sentAt = await $.clock.now()
@@ -362,6 +386,8 @@ export const register: Register = (on, options) => {
       const result = await s.result
       const speed = result.usage ? stepSpeed(sentAt, firstAt) : null
       if (speed) await update($, main, m => ({ ...normalize(DEFAULT_MAIN, m), speed }))
+      // Marked here, not at the next request: two compactions can come with one response between them.
+      if (result.usage && !hasFill) await update($, usage, x => afterResponse(normalize(DEFAULT_USAGE, x)))
       return result
     }
     const id = e.agentId
@@ -423,6 +449,8 @@ export const register: Register = (on, options) => {
   })
 
   on('session.compact', async ($, e, next) => {
+    // Any compaction reaching this hook, a subagent's or a precompute too, means the guard isn't in the way.
+    if (!(await getUsage($)).isCompactHooked) await update($, usage, x => afterCompactHooked(normalize(DEFAULT_USAGE, x)))
     const done = await next(e)
     if (!e.agentId && e.trigger !== 'precompute') {
       const now = await $.clock.now()
@@ -776,7 +804,9 @@ export const register: Register = (on, options) => {
                   ],
                 },
                 u.tokens !== null ? { spans: [{ text: `${kTokens(u.tokens)}/${kTokens(ctxFill.window)}`, dim: true }] } : null,
-                u.compactions > 0 ? { spans: [{ text: `⟲${u.compactions}`, color: C.amber }], lead: 1 } : null,
+                u.compactions > 0 ? { spans: [{ text: compactMark(u), color: C.amber }], lead: 1 } : null,
+                // Left out first when the line is short; the ~ in the mark still says it.
+                u.compactions > 0 && u.isCompactEstimate ? { spans: [{ text: '(estimated)', color: C.faint }] } : null,
               ],
               w - 4,
             )
@@ -1248,11 +1278,11 @@ export const register: Register = (on, options) => {
                       { text: mg.on, color: (ctxFill.pct ?? 0) >= 80 ? C.warn : C.main },
                       { text: mg.off, color: C.faint },
                       { text: ` ${Math.round(ctxFill.pct ?? 0)}%` },
-                      ...(u.compactions > 0 ? [{ text: ` ⟲${u.compactions}`, color: C.amber }] : []),
+                      ...(u.compactions > 0 ? [{ text: ` ${compactMark(u)}`, color: C.amber }] : []),
                     ],
                   }
                 : u.compactions > 0
-                  ? { spans: [{ text: `⟲${u.compactions}`, color: C.amber }] }
+                  ? { spans: [{ text: compactMark(u), color: C.amber }] }
                   : null,
               u.costUsd !== null ? { spans: [{ text: `· ${fmtUsd(u.costUsd)}`, dim: true }] } : null,
               showArchitect ? { spans: [{ text: `· ${cfg.architectLabel.toLowerCase()} ${advising ? 'advising' : a.consults.length}`, color: C.arch }] } : null,

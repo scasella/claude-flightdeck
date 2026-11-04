@@ -33,6 +33,14 @@ export type Usage = {
   limits: { kind: string; pct: number; resetsAt?: number | null }[]
   compactions: number
   lastCompactAt: number | null
+  /** `compactions` counts main-loop requests that found the context emptied (afterFillRead), not
+   *  session.compact calls, which Claude Code's built-in guard keeps from user plugins. */
+  isCompactEstimate: boolean
+  /** session.compact has reached Flightdeck: from then on the count is that hook's alone. */
+  isCompactHooked: boolean
+  /** A main-loop response has come back since the context last started over (a new session, a /clear,
+   *  a compaction), so `$.session.usage()` reports a fill until the next compaction. */
+  hasFill: boolean
 }
 
 export type Consult = { id: string; at: number; endAt: number | null; moment: Moment; via: string }
