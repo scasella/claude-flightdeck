@@ -847,7 +847,8 @@ const fillHost = ($: Parameters<TestBody>[0], on: On) => {
   engine(on)
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
-  on('session.compact', (_$, e) => ({ messages: e.messages }))
+  let veto: string | undefined
+  on('session.compact', (_$, e) => (veto ? { skip: veto } : { messages: e.messages }))
   let fill: number | undefined
   on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { window: 1_000_000, ...(fill !== undefined ? { tokens: fill } : {}) } } }))
   const usage = { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 60_000, cache_creation_input_tokens: 0, model: 'x' }
@@ -863,6 +864,10 @@ const fillHost = ($: Parameters<TestBody>[0], on: On) => {
       await s.result
     },
     measure: (tokens: number) => $.session.measure({ context: { window: 1_000_000, tokens, percent: tokens / 10_000 }, rateLimits: [], changed: ['context'] }),
+    /** Compactions from here on come back skipped with this reason, as a blocking PreCompact hook's do; undefined lets them run. */
+    vetoCompactions: (why: string | undefined) => {
+      veto = why
+    },
     /** The compaction mark the main box shows, whether it says `(estimated)`, and how many log lines say compacted. */
     shown: async () => {
       const ui = await $.ui.mount({ ...pane(64), surface: 'terminal' })
@@ -921,6 +926,18 @@ test('once session.compact reaches Flightdeck its count is the real one: estimat
   await h.request(60_000)
   await h.request(undefined)
   expect(await h.shown()).toEqual({ mark: '⟲1', isEstimated: false, logged: ['context compacted (estimated)', 'context compacted (auto)'] })
+})
+
+test('a compaction that comes back skipped is neither counted nor logged', async ($, on) => {
+  const h = fillHost($, on)
+  await h.measure(60_000)
+  const compact = () => $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'the summary', toolUses: [] }] })
+  h.vetoCompactions('a PreCompact hook blocked it')
+  await compact()
+  expect(await h.shown()).toEqual({ mark: null, isEstimated: false, logged: [] })
+  h.vetoCompactions(undefined)
+  await compact()
+  expect(await h.shown()).toEqual({ mark: '⟲1', isEstimated: false, logged: ['context compacted (manual)'] })
 })
 
 test("a surface module's fault key is the same for the hook's path, either separator, and the drawing's name", () => {
