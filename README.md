@@ -61,7 +61,7 @@ https://github.com/user-attachments/assets/9ad0fcc3-c81c-427a-a743-f7b6c49f5885
 
 | Panel | Shows | From |
 | --- | --- | --- |
-| **main** | model, effort, permission mode, request count; a context gauge with compactions (⟲), measured against the compaction window when the session compacts in a smaller one than the model's (`autoCompactWindow`, or Claude Code's own); cost and the first two rate-limit windows when your plan reports them, with the time to each reset (↻) from 56 columns; the last main-loop request's time to first token | `turn.step`, `session.measure`, `session.compact`, `$.session.usage()` (its local `summary` breakdown, once per model, for the compaction window) |
+| **main** | model, effort, permission mode, request count; a context gauge with compactions (⟲), measured against the compaction window when the session compacts in a smaller one than the model's (`autoCompactWindow`, or Claude Code's own); cost and the first two rate-limit windows when your plan reports them, with the time to each reset (↻) from 56 columns; the last main-loop request's time to first token | `turn.step`, `session.measure`, `session.compact`, `$.session.usage()` (its local `summary` breakdown, once per model, for the compaction window); the permission mode from `classic.UserPromptSubmit` and `agent.spawn` |
 | **architect** | consults on a timeline, whether one is running, how long the last took; optionally the moment of each consult; the first line of a subagent architect's advice | a spawn of a matching agent type, or a matching server tool in the assistant's rows |
 | **gate** | one cell per permission check: green allowed without asking, blue decided by the auto-mode classifier or you and then run, amber pending, red ✗ denied, dim if made inside a subagent. Totals, and a drill-down per tool family with credentials masked | `tool.check`, settled by the `tool.call` around it |
 | **agents** | cards side by side while they fit: the task, type, live context and output tokens, steps, a running clock, `max_tokens` in red. Beyond that, swimlanes on one time axis | `agent.spawn`, `turn.step`, `tool.call`, `turn.complete` |
@@ -153,6 +153,8 @@ In `/config`, or under `pluginConfigs[<id>].options` in your user `settings.json
 
 **Nothing shows in the VS Code extension.** In one report its 2.1.296 build ran Flightdeck's hooks but showed no pane, and none for another mod either ([#5](https://github.com/scasella/claude-flightdeck/issues/5)). Run `claude` in VS Code's integrated terminal instead, then `/flightdeck`: an integrated terminal is usually narrower than the 144 columns the pane needs to open by itself.
 
+**Under a Team or Enterprise login, the permission mode is missing or stale, and compactions aren't counted.** On a machine with managed settings, or in a session on a Team or Enterprise `/login`, Claude Code loads a built-in guard, `cc-plugin-sec-default`, that never runs a user-installed plugin's hooks on `classic.*` events or `session.compact` (see "Know which hooks of a user's mod don't run" in [Manage mods for your organization](https://code.claude.com/docs/en/plugins/mods/admin)). No other event a user's plugin can hook carries the permission mode except a subagent's start. So the main box shows no mode until a subagent starts, and then the mode as it was at that start. Until then, in auto mode the gate credits the calls the classifier cleared to `you`. The ⟲ count stays at zero, and the log never says `context compacted`. On 2.1.299 or later, `/plugin` shows a note naming those two hooks. The rest of the pane works. An administrator can let the hooks run by installing Flightdeck as one of the organization's own mods ([#23](https://github.com/scasella/claude-flightdeck/issues/23)).
+
 **Options seem ignored.** Check the key in your user `settings.json`: `pluginConfigs["flightdeck@claude-flightdeck"]` when installed, `pluginConfigs["flightdeck"]` with `--plugin-dir`. See [Configure](#configure).
 
 **Colours look wrong.** Set `palette` to `pastel` in `/config`.
@@ -169,7 +171,7 @@ In `/config`, or under `pluginConfigs[<id>].options` in your user `settings.json
 | [`hooks/core.ts`](hooks/core.ts) | every reducer, formatter and layout rule as pure functions, so behaviour is testable directly |
 | [`hooks/rail.tsx`](hooks/rail.tsx), [`hooks/elapsed.tsx`](hooks/elapsed.tsx) | surface modules: animated connectors and live clocks that redraw only themselves, on the surface's own frame clock |
 | [`types/index.d.ts`](types/index.d.ts) | the state contract |
-| [`tests/`](tests) | 50 tests: pure behaviour, plus drawings mounted on every surface at 24–120 columns, with every width from 24 to 40 checked for anything that spills past its box |
+| [`tests/`](tests) | 51 tests: pure behaviour, plus drawings mounted on every surface at 24–120 columns, with every width from 24 to 40 checked for anything that spills past its box |
 
 State lives in `$.state` atoms. Every read is merged over defaults, so a missing or older field never breaks the pane; an update that changes the state's shape may still reset its counters once. New to mods? Start with [Claude Code mods](https://claude.com/blog/claude-code-mods) and [Getting started with Claude Code mods](https://claude.dev/blog/getting-started-with-claude-code-mods/).
 
