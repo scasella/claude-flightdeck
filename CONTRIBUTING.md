@@ -22,7 +22,13 @@ npx -p typescript tsc -p .
 
 All three must pass. The type check needs `.claude-plugin/types/`, which Claude Code writes the first time it loads the mod.
 
-CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the same three checks on every pull request and on each push to `main`.
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the same three checks on every pull request and on each push to `main`. It also runs validate and the tests on the oldest Claude Code the README names, 2.1.289, where a prop or event that version lacks fails. To run that leg locally:
+
+```sh
+npx -y @anthropic-ai/claude-code@2.1.289 plugin test .
+```
+
+If a change needs a newer Claude Code, raise the floor in the README and in `ci.yml` together.
 
 ## Ground rules
 

@@ -2,7 +2,7 @@
 
 [![Release](https://img.shields.io/github/v/release/scasella/claude-flightdeck)](https://github.com/scasella/claude-flightdeck/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Claude Code 2.1.287+](https://img.shields.io/badge/Claude%20Code-2.1.287%2B%20mod-d97757.svg)](https://claude.com/blog/claude-code-mods)
+[![Claude Code 2.1.289+](https://img.shields.io/badge/Claude%20Code-2.1.289%2B%20mod-d97757.svg)](https://claude.com/blog/claude-code-mods)
 [![Listed on statuslin.es](https://img.shields.io/badge/listed%20on-statuslin.es-c96442)](https://statuslin.es/mods/flightdeck)
 
 **A Claude Code mod that puts a live agent dashboard in your terminal**: context and cost, an advisor timeline, every permission check, and your subagents as cards or swimlanes. Every number comes from a real session event, and nothing leaves your machine.
@@ -17,7 +17,7 @@
 
 ## Install
 
-Inside Claude Code (2.1.287 or later):
+Inside Claude Code (2.1.289 or later):
 
 ```
 /plugin marketplace add scasella/claude-flightdeck
@@ -147,7 +147,7 @@ In `/config`, or under `pluginConfigs[<id>].options` in your user `settings.json
 ## Troubleshooting
 
 **The pane doesn't appear.**
-- Check `claude --version` is 2.1.287 or later, then run `/reload-plugins` and `/flightdeck`.
+- Check `claude --version` is 2.1.289 or later, then run `/reload-plugins` and `/flightdeck`. On an older version the transcript says `flightdeck: hooks module did not load: …`.
 - Below 144 columns, Claude Code won't seat a pane nobody asked for; `/flightdeck` opens it at any width.
 - Look in the transcript for a dim line starting `flightdeck:`. It names the hook that failed or the reason the pane was refused. Please [open an issue](https://github.com/scasella/claude-flightdeck/issues) with it.
 - If the pane shows only `draw failed (…)`, its drawing hook threw; include that line in the issue too.

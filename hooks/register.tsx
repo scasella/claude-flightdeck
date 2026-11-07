@@ -647,7 +647,9 @@ export const register: Register = (on, options) => {
   // ---------------------------------------------------------------- drawing
 
   // After a surface module faults on a surface, this load draws it there as plain text; the other
-  // module, and other surfaces, keep theirs. Keyed by faultKey: `desktop:rail.tsx`.
+  // module, and other surfaces, keep theirs. Keyed by faultKey: `desktop:rail.tsx`. `ui.fault` came in
+  // Claude Code 2.1.289, and an older engine refuses to load a module that hooks it: the floor the README
+  // states and CI's oldest leg tests.
   const faulted = new Set<string>()
   on('ui.fault', async ($, e, next) => {
     const key = faultKey(e.surface, e.module)
@@ -659,7 +661,7 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // Text's `mono` came in Claude Code 2.1.299, after the 2.1.287 Flightdeck supports. An older engine refuses
+  // Text's `mono` came in Claude Code 2.1.299, after the 2.1.289 Flightdeck supports. An older engine refuses
   // the prop ("Text prop "mono" is not allowed"): a connector drawn with it unmounts the pane, from the first
   // prompt on, when the first connector appears (#28). So the connectors ask for the face only where the
   // engine says it is that new, read once per load.
