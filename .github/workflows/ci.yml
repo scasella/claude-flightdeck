@@ -13,7 +13,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  CLAUDE_CODE_VERSION: 2.1.309
   TYPESCRIPT_VERSION: 7.0.2
   # Keep the pinned CLI from updating itself or sending telemetry
   DISABLE_AUTOUPDATER: 1
@@ -21,8 +20,22 @@ env:
 
 jobs:
   checks:
+    name: checks (Claude Code ${{ matrix.claude-code }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest Claude Code the README promises (badge, Install, Troubleshooting):
+          # move the two together. Each test draws against its own engine's element
+          # table, so a prop or event newer than this fails here, not in a session (#28).
+          - claude-code: 2.1.289
+          # The newest pinned: it also writes the API types tsc checks against.
+          - claude-code: 2.1.309
+            types: true
+    env:
+      CLAUDE_CODE_VERSION: ${{ matrix.claude-code }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -50,8 +63,10 @@ jobs:
       # interactive session loads the mod from --plugin-dir (print mode never
       # does). A throwaway config marks onboarding done and this folder trusted,
       # so the session starts with no credentials and makes no model call; it is
-      # stopped as soon as the types are on disk.
+      # stopped as soon as the types are on disk. Only the newest leg writes them
+      # and runs tsc: the code is type-checked against the newest engine's API.
       - name: Write the API types
+        if: matrix.types
         env:
           CLAUDE_CONFIG_DIR: ${{ runner.temp }}/claude-config
           TERM: xterm-256color
@@ -82,4 +97,5 @@ jobs:
           ls -R "$types"
 
       - name: npx -p typescript tsc -p .
+        if: matrix.types
         run: npx -y -p "typescript@$TYPESCRIPT_VERSION" tsc -p .

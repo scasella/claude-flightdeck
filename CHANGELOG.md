@@ -3,6 +3,8 @@
 ## Unreleased
 
 - On Claude Code before 2.1.299 the pane no longer empties, session log and all, once the first prompt is sent. Since 0.5.1 the connectors between panels asked for `Text`'s monospaced face (`mono`), which Claude Code has only from 2.1.299, and the first connector is drawn when a turn starts. Flightdeck now asks for that face only where `$.session.version()` reports 2.1.299 or later. Older versions draw the connectors in the default face, so on a graphical surface a running connector's right end may jitter again, as before 0.5.1. ([#28](https://github.com/scasella/claude-flightdeck/issues/28), thanks @Bexxs75 for tracing it to 0.5.1)
+- Flightdeck needs Claude Code 2.1.289 or later, and the README now says so; it said 2.1.287. Since 0.5.0 Flightdeck hooks `ui.fault`, to draw a connector or clock that faulted as plain text, and that event came in 2.1.289. On 2.1.287 and 2.1.288 the session says `flightdeck: hooks module did not load: … "ui.fault" is not an event` and nothing of Flightdeck runs.
+- CI runs `claude plugin validate` and the tests on that floor, 2.1.289, as well as on 2.1.309, so a prop or event newer than the floor fails CI instead of a session. The tests that check the connectors' monospaced face ask the engine running them whether it draws that face.
 
 ## 0.6.0
 
