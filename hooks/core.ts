@@ -518,6 +518,24 @@ export const noteTool = (c: AgentCard, n: ToolNote): AgentCard => ({ ...c, tools
 /** A surface module's fault key, `desktop:rail.tsx`, from `hooks/rail.tsx` or `hooks\rail.tsx` alike. */
 export const faultKey = (surface: string, module: string) => `${surface}:${module.split(/[\\/]/).pop()}`
 
+/** The first Claude Code release whose `Text` takes `mono`, the surface's monospaced face. */
+export const MONO_SINCE = [2, 1, 299] as const
+
+/**
+ * Whether the engine a session runs on draws `Text`'s `mono`: its release (`base`, else `version`) is
+ * 2.1.299 or later. False when there is no version or it is not spelled as one: the line is then drawn
+ * without the face, which only a graphical surface would miss.
+ */
+export const knowsMono = (v: { version?: string; base?: string } | null | undefined): boolean => {
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v?.base ?? v?.version ?? '')
+  if (!m) return false
+  for (let i = 0; i < MONO_SINCE.length; i += 1) {
+    const part = Number(m[i + 1])
+    if (part !== MONO_SINCE[i]) return part > MONO_SINCE[i]!
+  }
+  return true
+}
+
 /** A card whose agent was resumed after it finished (SendMessage): running again, its clock from its first spawn. */
 export const resumeCard = (c: AgentCard): AgentCard => ({ ...c, status: 'running', endedAt: null })
 

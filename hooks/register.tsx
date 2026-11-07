@@ -29,6 +29,7 @@ import {
   contextFill,
   faultKey,
   forgetCompactRead,
+  knowsMono,
   titleLines,
   consultTimeline,
   describeInput,
@@ -102,6 +103,14 @@ async function getMain($: EngineInterface): Promise<Main> {
 }
 async function getUsage($: EngineInterface): Promise<Usage> {
   return normalize(DEFAULT_USAGE, await read($, usage))
+}
+/** Whether this engine's Text takes `mono`; false when it can't say, or has no `$.session.version` to ask. */
+async function readMono($: EngineInterface): Promise<boolean> {
+  try {
+    return knowsMono(await $.session.version())
+  } catch {
+    return false
+  }
 }
 async function getArchitect($: EngineInterface): Promise<Architect> {
   const a = normalize(DEFAULT_ARCHITECT, await read($, architect))
@@ -650,13 +659,19 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // Text's `mono` came in Claude Code 2.1.299, after the 2.1.287 Flightdeck supports. An older engine refuses
+  // the prop ("Text prop "mono" is not allowed"): a connector drawn with it unmounts the pane, from the first
+  // prompt on, when the first connector appears (#28). So the connectors ask for the face only where the
+  // engine says it is that new, read once per load.
+  let monoRead: Promise<boolean> | null = null
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const els = $.ui.resolve(e)
     const { Box, Text, Button } = els
     const hasClient = 'Client' in els
     const hasRail = hasClient && !faulted.has(faultKey(e.surface, 'rail.tsx'))
     const hasClock = hasClient && !faulted.has(faultKey(e.surface, 'elapsed.tsx'))
-    const [m, u, a, g, cards, lp, lines, t, r, v, now] = await Promise.all([
+    const [m, u, a, g, cards, lp, lines, t, r, v, now, mono] = await Promise.all([
       getMain($),
       getUsage($),
       getArchitect($),
@@ -668,6 +683,7 @@ export const register: Register = (on, options) => {
       read($, receipt),
       getView($),
       $.clock.now(),
+      (monoRead ??= readMono($)),
     ])
     // The body's own width, down to the narrowest dock Claude Code seats (24): a wider drawing is cut off at the frame.
     const W = Math.max(24, e.props.bodyColumns)
@@ -701,10 +717,10 @@ export const register: Register = (on, options) => {
           module="./rail.tsx"
           width={width}
           height={1}
-          props={{ active, width, color, dim: C.faint, marks, isMerge }}
+          props={{ active, width, color, dim: C.faint, marks, isMerge, mono }}
         />
       ) : (
-        <Text color={C.faint} mono>
+        <Text color={C.faint} {...(mono ? { mono: true } : {})}>
           {'─'.repeat(Math.max(1, width))}
         </Text>
       )
