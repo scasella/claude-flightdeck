@@ -300,6 +300,22 @@ test('inline above the prompt, the pane is a summary of at most 8 rows', async (
   }
 })
 
+test('the pane closes from its own button, docked and inline, as /flightdeck close does', async ($, on) => {
+  engine(on)
+  const closed: string[] = []
+  on('ui.close', (_$, e) => (closed.push(`${e.id} ${e.origin.kind}`), { value: undefined }))
+  for (const [cols, placement] of [[64, 'dock'], [80, 'inline'], [30, 'dock']] as const) {
+    const ui = await $.ui.mount({ ...pane(cols), props: { ...pane(cols).props, placement }, surface: 'terminal' })
+    const button = await ui.find({ key: 'close' })
+    expect(button?.props.label).toBe(cols >= 40 ? '× close' : '×')
+    expect(button?.props.role).toBe('dismiss')
+    expect(button?.props.hotkey).toBe('x')
+    await ui.press({ key: 'close' })
+    await ui.unmount()
+  }
+  expect(closed).toEqual(['flightdeck plugin', 'flightdeck plugin', 'flightdeck plugin'])
+})
+
 test('/clear starts the pane fresh', async ($, on) => {
   engine(on)
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
