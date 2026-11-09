@@ -782,6 +782,19 @@ export const register: Register = (on, options) => {
       )
     }
 
+    // The pane's own close, as `/flightdeck close`, at the end of its first row. `role="dismiss"` lets a
+    // graphical surface draw it as its native close control; a terminal draws it as any plain Button.
+    const closeLabel = W >= 40 ? '× close' : '×'
+    const closeCells = cellWidth(closeLabel) + 3 // a plain Button with a hotkey draws `x: ` before its label
+    const withClose = (row: (room: number) => RenderChildren) => (
+      <Box width={W} columnGap={1}>
+        {row(W - closeCells - 1)}
+        <Box flexShrink={0}>
+          <Button key="close" plain role="dismiss" hotkey="x" dimColor label={closeLabel} onPress={() => void $.ui.close({ id: PANE }).catch(() => undefined)} />
+        </Box>
+      </Box>
+    )
+
     // ---- main
     const effortN = { low: 1, medium: 2, high: 3, xhigh: 4, max: 4 }[m.effort] ?? 0
     const ctxFill = contextFill(u)
@@ -1282,7 +1295,7 @@ export const register: Register = (on, options) => {
       const mg = ctxFill.pct !== null ? gauge(ctxFill.pct, 6) : null
       return (
         <Box flexDirection="column" width={W}>
-          {line(
+          {withClose(room => line(
             [
               {
                 spans: [
@@ -1306,8 +1319,8 @@ export const register: Register = (on, options) => {
               u.costUsd !== null ? { spans: [{ text: `· ${fmtUsd(u.costUsd)}`, dim: true }] } : null,
               showArchitect ? { spans: [{ text: `· ${cfg.architectLabel.toLowerCase()} ${advising ? 'advising' : a.consults.length}`, color: C.arch }] } : null,
             ],
-            W,
-          )}
+            room,
+          ))}
           {strip.length > 0 ? (
             <Box columnGap={1}>
               <Text dimColor>{cfg.gateLabel.toLowerCase()}</Text>
@@ -1365,7 +1378,7 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column" width={W}>
         {/* Below 40 columns the frame's own title names the pane, so the header starts at the model. */}
-        {line(
+        {withClose(room => line(
           [
             W >= 40 ? { spans: [{ text: 'FLIGHTDECK', bold: true }, { text: ' ·', color: C.dim, bold: true }] } : null,
             { spans: [{ text: modelName.toUpperCase(), color: C.main, bold: true }, { text: m.isRunning ? ' WORKS' : ' IDLE', bold: true }] },
@@ -1379,10 +1392,10 @@ export const register: Register = (on, options) => {
                 }
               : null,
           ],
-          W,
+          room,
           1,
           'center',
-        )}
+        ))}
         <Box key="legend" justifyContent="center" columnGap={2} marginBottom={legendGap}>
           {legend.map(l => (
             <Box flexShrink={0}>
