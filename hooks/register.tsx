@@ -1223,12 +1223,18 @@ export const register: Register = (on, options) => {
                   : logPanel(w)
 
     // Panels with the flow between them; the agents panel draws its own rails.
-    const column = (ps: Panel[], w: number) => (
+    const column = (ps: Panel[], w: number) => {
+      // The agents panel only ends in a downward merge rail as stacked cards with none expanded. As
+      // swimlanes, or with a card expanded below them, it ends on a plain box, so the panel after it
+      // needs the same connector every other box gets rather than butting straight against it.
+      const agentsFit = Math.max(1, Math.min(cfg.maxCards, Math.floor((w + 1) / 21)))
+      const agentsEndsConnected = cards.length <= agentsFit && !expandedCard
+      return (
       <Box flexDirection="column" width={w}>
         {ps.map((p, i) => {
           const prev = ps[i - 1]
           const link =
-            i === 0 || p === 'agents' || prev === 'agents' || p === 'log' || p === 'loops' || prev === 'loops'
+            i === 0 || p === 'agents' || (prev === 'agents' && agentsEndsConnected) || p === 'log' || p === 'loops' || prev === 'loops'
               ? null
               : rail(`link-${p}`, p === 'architect' ? advising : m.isRunning, p === 'architect' ? C.arch : C.main, w)
           return (
@@ -1240,7 +1246,8 @@ export const register: Register = (on, options) => {
           )
         })}
       </Box>
-    )
+      )
+    }
 
     // Desktop draws the agents' time axis as SVG under the panels.
     const svgLanes =
