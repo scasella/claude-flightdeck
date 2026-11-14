@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderChildren } from 'claude-code'
+import type { EngineInterface, Register, RenderChildren, RenderInput, StateWrite } from 'claude-code'
 
 import type { AgentCard, Architect, Bucket, Check, Gate, Layout, LogLine, Loop, Main, Roster, Turn, Usage, View } from '../types'
 import {
@@ -75,9 +75,12 @@ import {
   stepLoop,
 } from './core'
 import type { Config, Panel } from './core'
+import { TOOLBAR_KEYS, fillSlot, offerChoice, placementIn } from './pane-grid'
 
 const PANE = 'flightdeck'
 const TITLE = 'Flightdeck'
+// The name in .claude-plugin/plugin.json: what pane-grid (https://github.com/hwanyong/pane-grid) places in a cell.
+const PLUGIN = 'flightdeck'
 
 
 // ---------------------------------------------------------------- state
@@ -206,10 +209,35 @@ async function isArchitectType($: EngineInterface, cfg: Config, type: string) {
   return cfg.architect.test(type) || (await getRoster($)).architectTypes.includes(type)
 }
 
+/**
+ * This mod's pane-grid cell, or undefined without one (or without pane-grid). Called while drawing, the drawing
+ * is redrawn when pane-grid changes the layout. It reads here, not through hooks/pane-grid.ts: an engine before
+ * Claude Code 2.1.299 follows `$` only into a function of this same file and does not load the module otherwise.
+ */
+async function readPlacement($: EngineInterface, plugin: string) {
+  const read = (await $.state.get({ plugin: 'pane-grid', key: 'layout' } as never)) as { value?: unknown }
+  return placementIn(read.value, plugin)
+}
+
 async function openPane($: EngineInterface, cfg: Config) {
   // columns apply when docked beside the transcript, rows when seated inline above the prompt.
   return $.ui.open({ id: PANE, title: TITLE, columns: cfg.paneColumns, rows: 8 })
 }
+
+/**
+ * While a pane-grid cell holds the deck, its own pane stays closed. It opens again only when the cell is
+ * emptied, so a pane the person closed stays closed.
+ */
+async function placeOwnPane($: EngineInterface, cfg: Config, layout: unknown, previous: unknown) {
+  const isPlaced = placementIn(layout, PLUGIN) !== undefined
+  const isOpen = (await $.ui.panes()).some(pane => pane.id === PANE)
+  if (isPlaced && isOpen) return $.ui.close({ id: PANE })
+  if (isPlaced || isOpen || placementIn(previous, PLUGIN) === undefined) return
+  await openPane($, cfg)
+}
+
+/** Where a pane-grid cell draws the deck, for the replies of /flightdeck. */
+const cellOf = (placement: { cell: string; tab: string }) => `pane-grid cell ${placement.cell} of the ${placement.tab} grid`
 
 async function resetAll($: EngineInterface) {
   await update($, main, m => ({ ...DEFAULT_MAIN, model: normalize(DEFAULT_MAIN, m).model, mode: normalize(DEFAULT_MAIN, m).mode }))
@@ -242,6 +270,757 @@ async function costNow($: EngineInterface): Promise<number | null> {
 
 async function noteMode($: EngineInterface, mode: string | undefined) {
   if (mode) await update($, main, m => (normalize(DEFAULT_MAIN, m).mode === mode ? normalize(DEFAULT_MAIN, m) : { ...normalize(DEFAULT_MAIN, m), mode }))
+}
+
+// ---------------------------------------------------------------- the deck
+
+/** What a drawing of the deck reads besides session state: this load's settings and faults, and where it draws. */
+type Deck = {
+  cfg: Config
+  /** Surface modules that faulted on a surface, keyed by faultKey: drawn as plain text there. */
+  faulted: ReadonlySet<string>
+  /** Whether this engine's Text takes `mono` (readMono). */
+  mono: boolean
+  columns: number
+  rows: number
+  /** The hotkey a Button takes for a key, or undefined where the drawing takes none. */
+  hotkey: (key: string) => string | undefined
+}
+
+/** The rows the log sizes itself by, in the pane's own body. */
+const paneRows = (e: RenderInput<'Pane'>) => e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 40
+
+/** The deck, `columns` wide and `rows` high: the pane's body, or a pane-grid cell's. */
+async function drawDeck($: EngineInterface, e: RenderInput<'Pane'>, deck: Deck) {
+  const { cfg, faulted, mono, columns, rows, hotkey } = deck
+  const C = PALETTES[cfg.palette]
+  const els = $.ui.resolve(e)
+  const { Box, Text, Button } = els
+  const hasClient = 'Client' in els
+  const hasRail = hasClient && !faulted.has(faultKey(e.surface, 'rail.tsx'))
+  const hasClock = hasClient && !faulted.has(faultKey(e.surface, 'elapsed.tsx'))
+  const [m, u, a, g, cards, lp, lines, t, r, v, now] = await Promise.all([
+    getMain($),
+    getUsage($),
+    getArchitect($),
+    getGate($),
+    getCards($),
+    getLoops($),
+    getLog($),
+    getTurn($),
+    read($, receipt),
+    getView($),
+    $.clock.now(),
+  ])
+  // The body's own width, down to the narrowest dock Claude Code seats (24): a wider drawing is cut off at the frame.
+  const W = Math.max(24, columns)
+  const layout = v.layout ?? cfg.layout
+  const isWide = layout === 'wide' || (layout === 'auto' && W >= 110)
+  const colW = isWide ? Math.floor((W - 2) / 2) : W
+  const modelName = prettyModel(m.model)
+  const viewed = e.props.view?.agentId ?? null
+  const advising = isAdvising(a)
+  const running = cards.filter(c => c.status === 'running')
+  const showArchitect = a.consults.length > 0 || a.ids.length > 0
+  const motion = cfg.motion && hasRail
+  // A panel with nothing to show yet takes no room: most sessions never spawn an agent.
+  const isEmpty: Record<Panel, boolean> = {
+    main: false,
+    architect: !showArchitect,
+    gate: g.recent.length === 0 && gateSummary(g).total === 0,
+    agents: cards.length === 0,
+    loops: lp.length === 0,
+    receipt: !m.isRunning && !r,
+    log: false,
+  }
+  const panels = cfg.panels.filter(p => !isEmpty[p])
+  const decider = m.mode === 'auto' ? 'classifier' : 'you'
+
+  // A connector between panels: animated while its flow is live, a dim line otherwise.
+  const rail = (key: string, active: boolean, color: string, width: number, marks: number[] = [], isMerge = false) =>
+    motion ? (
+      <els.Client
+        key={key}
+        module="./rail.tsx"
+        width={width}
+        height={1}
+        props={{ active, width, color, dim: C.faint, marks, isMerge, mono }}
+      />
+    ) : (
+      <Text color={C.faint} {...(mono ? { mono: true } : {})}>
+        {'─'.repeat(Math.max(1, width))}
+      </Text>
+    )
+
+  // A start time of 0 is unknown (state saved before it was recorded): no clock, not decades.
+  const clock = (key: string, since: number, endAt: number | null, color: string) =>
+    since <= 0 ? (
+      <Text color={color}>—</Text>
+    ) : hasClock ? (
+      <els.Client key={key} module="./elapsed.tsx" props={{ since, now, endAt, color }} />
+    ) : (
+      <Text color={color}>{fmtTimer((endAt ?? now) - since)}</Text>
+    )
+
+  const isTerminal = e.surface === 'terminal'
+  // A row of marks (gate checks, loop dots), sized by `marksIn`. Should a surface draw them wider
+  // still, the row is cut at its box rather than running past it.
+  const markRow = (marks: RenderChildren, lead = 0) => (
+    <Box overflow="hidden" {...(lead ? { marginLeft: lead } : {})}>
+      <Text wrap="truncate-start">{marks}</Text>
+    </Box>
+  )
+  // A terminal's border row stands apart from the text above it; a graphical surface draws the
+  // border flush against it, so the legend keeps one row of air there.
+  const legendGap = isTerminal ? 0 : 1
+
+  // A line of coloured pieces, drawn as a row of boxes the way the log draws its lines. A Text nesting
+  // coloured Texts truncates as one line in a terminal, but the desktop app wraps each nested piece on its
+  // own, lays truncating ones out as blocks of their own, and collapses runs of spaces. So pieces sit `gap`
+  // cells apart (a piece's `lead` adds more), each keeps its width, and pieces that don't fit in `room` are
+  // left out from the end; or a piece marked `fill` (one span) truncates to what the others leave.
+  type Span = { text: string; color?: string; dim?: boolean; bold?: boolean }
+  type Piece = { spans: Span[]; lead?: number; fill?: boolean }
+  const styleOf = (s: Span) => ({ ...(s.color ? { color: s.color } : {}), ...(s.dim ? { dimColor: true } : {}), ...(s.bold ? { bold: true } : {}) })
+  const widthOf = (p: Piece) => p.spans.reduce((n, s) => n + cellWidth(s.text), 0)
+  const line = (pieces: (Piece | null)[], room: number, gap = 1, justify?: 'center') => {
+    const all = pieces.filter((p): p is Piece => p !== null)
+    const shown = all.some(p => p.fill) ? all : all.slice(0, piecesThatFit(all.map(p => ({ width: widthOf(p), lead: p.lead })), room, gap))
+    return (
+      <Box width={room} columnGap={gap} overflow="hidden" {...(justify ? { justifyContent: justify } : {})}>
+        {shown.map(p => {
+          const lead = p.lead ? { marginLeft: p.lead } : {}
+          if (p.fill && p.spans[0]) {
+            return (
+              <Text {...styleOf(p.spans[0])} wrap="truncate">
+                {p.spans[0].text}
+              </Text>
+            )
+          }
+          return (
+            <Box flexShrink={0} {...lead}>
+              {p.spans.length === 1 && p.spans[0] ? <Text {...styleOf(p.spans[0])}>{p.spans[0].text}</Text> : <Text>{p.spans.map(s => <Text {...styleOf(s)}>{s.text}</Text>)}</Text>}
+            </Box>
+          )
+        })}
+      </Box>
+    )
+  }
+
+  // ---- main
+  const effortN = { low: 1, medium: 2, high: 3, xhigh: 4, max: 4 }[m.effort] ?? 0
+  const ctxFill = contextFill(u)
+  const ctxGauge = ctxFill.pct !== null ? gauge(ctxFill.pct, 10) : null
+  const mainPanel = (w: number) => (
+    <Box flexDirection="column" borderStyle="round" borderColor={C.main} paddingX={1} width={w}>
+      <Box justifyContent="space-between">
+        <Text color={C.main} bold wrap="truncate">
+          {modelName} · main
+        </Text>
+        <Box flexShrink={0}>
+          <Text color={m.isRunning ? C.main : C.dim}>{m.isRunning ? '● working' : '○ idle'}</Text>
+        </Box>
+      </Box>
+      {line(
+        [
+          {
+            spans: [
+              { text: 'effort ', dim: true },
+              { text: `${'▮'.repeat(effortN) + '▯'.repeat(4 - effortN)} `, color: C.main },
+              { text: m.effort || '—', color: C.main, bold: true },
+            ],
+          },
+          m.mode ? { spans: [{ text: `mode ${m.mode}`, dim: true }] } : null,
+          { spans: [{ text: `${m.steps} req`, dim: true }] },
+        ],
+        w - 4,
+        3,
+      )}
+      {ctxGauge
+        ? line(
+            [
+              {
+                spans: [
+                  { text: 'ctx ', dim: true },
+                  { text: ctxGauge.on, color: ctxFill.pct !== null && ctxFill.pct >= 80 ? C.warn : C.main },
+                  { text: ctxGauge.off, color: C.faint },
+                  { text: ` ${Math.round(ctxFill.pct ?? 0)}%`, bold: true },
+                ],
+              },
+              u.tokens !== null ? { spans: [{ text: `${kTokens(u.tokens)}/${kTokens(ctxFill.window)}`, dim: true }] } : null,
+              u.compactions > 0 ? { spans: [{ text: compactMark(u), color: C.amber }], lead: 1 } : null,
+              // Left out first when the line is short; the ~ in the mark still says it.
+              u.compactions > 0 && u.isCompactEstimate ? { spans: [{ text: '(estimated)', color: C.faint }] } : null,
+            ],
+            w - 4,
+          )
+        : null}
+      {u.costUsd !== null || u.limits.length > 0
+        ? line(
+            [
+              u.costUsd !== null ? { spans: [{ text: fmtUsd(u.costUsd), color: C.text }] } : null,
+              ...u.limits.slice(0, 2).map((l, i): Piece => {
+                const lg = gauge(l.pct, 5)
+                // The time to each reset where the line has room for it: both windows fit from 56 columns,
+                // so a wide pane's half column (59 at 120) has them; a window that doesn't fit is left out.
+                const resetIn = w >= 56 ? fmtResetIn(l.resetsAt, now) : ''
+                return {
+                  lead: i > 0 ? 1 : u.costUsd !== null ? 2 : 0,
+                  spans: [
+                    { text: `${limitLabel(l.kind)} `, dim: true },
+                    { text: lg.on, color: l.pct >= 80 ? C.warn : C.main },
+                    { text: lg.off, color: C.faint },
+                    { text: ` ${Math.round(l.pct)}%${resetIn ? ` ↻${resetIn}` : ''}`, dim: true },
+                  ],
+                }
+              }),
+            ],
+            w - 4,
+          )
+        : null}
+      {m.speed ? <Text dimColor wrap="truncate">{`last req  ${fmtSpeed(m.speed)}`}</Text> : null}
+    </Box>
+  )
+
+  // ---- architect
+  const lastConsult = a.consults[a.consults.length - 1]
+  const architectPanel = (w: number) => {
+    // Both ends are anchors (the first consult, now): should it run past its box, it asks to lose the middle.
+    const tl = consultTimeline(a, now, Math.max(8, w - 4))
+    return (
+      <Box flexDirection="column" borderStyle="round" borderColor={C.arch} paddingX={1} width={w}>
+        <Box justifyContent="space-between">
+          <Text color={C.arch} bold wrap="truncate">
+            {cfg.architectLabel} · {advising ? 'advising' : 'on call'}
+          </Text>
+          <Box flexShrink={0}>
+            <Text>
+              <Text dimColor>consults </Text>
+              <Text color={C.arch} bold>
+                {a.consults.length}
+              </Text>
+            </Text>
+          </Box>
+        </Box>
+        <Text color={C.arch} wrap="truncate-middle">
+          {tl}
+        </Text>
+        {lastConsult ? (
+          <Text dimColor wrap="truncate">
+            {advising
+              ? `consulting since ${fmtClock(lastConsult.at)}`
+              : `last ${fmtDuration(now - (lastConsult.endAt ?? lastConsult.at))} ago · took ${fmtDuration((lastConsult.endAt ?? now) - lastConsult.at)}`}
+          </Text>
+        ) : (
+          <Text dimColor>not consulted yet</Text>
+        )}
+        {cfg.moments ? (
+          <Box flexWrap="wrap" columnGap={2}>
+            {(['before a plan', 'error repeats', 'before done'] as const).map(mo => {
+              const isOn = lastConsult?.moment === mo
+              return (
+                <Text color={isOn ? C.arch : C.dim} bold={isOn}>
+                  {isOn ? '◆' : '◇'} {mo}
+                </Text>
+              )
+            })}
+            <Text color={C.faint}>(inferred)</Text>
+          </Box>
+        ) : null}
+        {a.lastAdvice ? (
+          <Text color={C.arch} wrap="truncate">
+            » {a.lastAdvice}
+          </Text>
+        ) : null}
+      </Box>
+    )
+  }
+
+  // ---- gate
+  const s = gateSummary(g)
+  const verdictColor = (c: Check) =>
+    c.verdict === 'rule' ? C.gate : c.verdict === 'cleared' ? C.cleared : c.verdict === 'ask' ? C.amber : C.warn
+  const checkMark = (c: Check) => (
+    <Text color={verdictColor(c)} dimColor={c.inSubagent}>
+      {c.verdict === 'deny' ? '✗' : '■'}
+    </Text>
+  )
+  const gatePanel = (w: number) => {
+    const strip = g.recent.slice(-Math.max(8, marksIn(w - 4, isTerminal)))
+    const open = v.gateOpen
+    // The totals in words where they all fit, in numbers alone where they don't: the colours say which is which.
+    const totalsOf = (isShort: boolean): Piece[] => [
+      { spans: [{ text: '■', color: C.gate }, { text: isShort ? ` ${s.rule}` : ` ${s.rule} allowed`, dim: true }] },
+      { spans: [{ text: '■', color: C.cleared }, { text: isShort ? ` ${s.cleared}` : ` ${s.cleared} ${decider}`, dim: true }] },
+      ...(s.ask > 0 ? [{ spans: [{ text: isShort ? `■ ${s.ask}` : `■ ${s.ask} pending`, color: C.amber }] }] : []),
+      { spans: [{ text: isShort ? `✗ ${s.deny}` : `✗ ${s.deny} denied`, color: s.deny > 0 ? C.warn : C.dim }] },
+    ]
+    const words = totalsOf(false)
+    const isShort = piecesThatFit(words.map(p => ({ width: widthOf(p) })), w - 4, 2) < words.length
+    const totals = isShort ? totalsOf(true) : words
+    return (
+      <Box flexDirection="column" borderStyle="round" borderColor={C.gate} paddingX={1} width={w}>
+        <Box justifyContent="space-between">
+          <Text color={C.gate} bold wrap="truncate">
+            {cfg.gateLabel} · permissions
+          </Text>
+          <Box flexShrink={0}>
+            <Text dimColor>{`${s.total} checks`}</Text>
+          </Box>
+        </Box>
+        {strip.length === 0 ? <Text color={C.faint}>no checks yet</Text> : markRow(strip.map(checkMark))}
+        {line([...totals, !isShort && w >= 80 && g.recent.some(c => c.inSubagent) ? { spans: [{ text: 'dim: in subagents', color: C.faint }] } : null], w - 4, 2)}
+        {/* Below about 44 columns the three rows' buttons take two lines rather than run past the box. */}
+        <Box columnGap={2} flexWrap="wrap">
+          {(['file', 'shell', 'other'] as const).map((b: Bucket) => {
+            const tl = g.totals[b]
+            const n = tl.rule + tl.ask + tl.cleared + tl.deny
+            return (
+              <Button
+                key={`gate-${b}`}
+                plain
+                hotkey={hotkey(b.charAt(0))}
+                label={`${b} ${n}${open === b ? ' ▾' : ''}`}
+                dimColor={n === 0}
+                onPress={() => update($, view, x => ({ ...normalize(DEFAULT_VIEW, x), gateOpen: normalize(DEFAULT_VIEW, x).gateOpen === b ? null : b }))}
+              />
+            )
+          })}
+        </Box>
+        {open
+          ? g.recent
+              .filter(c => c.bucket === open)
+              .slice(-5)
+              .map(c => (
+                // The verdict sits in a box of its own width, not padded with spaces, which a graphical surface collapses.
+                <Box width={w - 4} columnGap={1} overflow="hidden">
+                  <Box width={12} flexShrink={0}>
+                    <Text>
+                      <Text color={verdictColor(c)}>{c.verdict === 'deny' ? '✗ ' : '■ '}</Text>
+                      <Text color={C.dim}>{c.verdict === 'rule' ? 'allowed' : c.verdict === 'cleared' ? decider : c.verdict === 'ask' ? 'pending' : 'denied'}</Text>
+                    </Text>
+                  </Box>
+                  <Text dimColor={c.inSubagent} wrap="truncate">
+                    {shorten(c.detail, Math.max(10, w - 18))}
+                  </Text>
+                </Box>
+              ))
+          : null}
+      </Box>
+    )
+  }
+
+  // ---- agents: cards up to the limit, swimlanes beyond it
+  const statusColor = (c: AgentCard) => (c.status === 'failed' ? C.warn : c.status === 'done' ? C.gate : C.agent)
+  const glyph = (c: AgentCard) => (c.status === 'running' ? '◐' : c.status === 'done' ? '✓' : c.status === 'failed' ? '✗' : '■')
+  const expandOnPress = (id: string) => () =>
+    update($, view, x => ({ ...normalize(DEFAULT_VIEW, x), expanded: normalize(DEFAULT_VIEW, x).expanded === id ? null : id }))
+
+  const agentsPanel = (w: number) => {
+    // Cards need 20 columns each; when the pane can't hold the limit, lanes take over.
+    const fit = Math.max(1, Math.min(cfg.maxCards, Math.floor((w + 1) / 21)))
+    const useLanes = cards.length > fit
+    const isNarrow = w < 40
+    const header = (
+      <Box justifyContent="space-between" width={w}>
+        <Text bold wrap="truncate">
+          {isNarrow ? `agents · ${running.length}/${cards.length}` : `agents · ${running.length} running · ${cards.length} total`}
+        </Text>
+        {cards.length > 0 ? (
+          <Box flexShrink={0}>
+            <Text color={C.faint}>{`1-${Math.min(cards.length, useLanes ? 6 : fit)}${isNarrow ? '' : ' expand'}`}</Text>
+          </Box>
+        ) : null}
+      </Box>
+    )
+    if (cards.length === 0) {
+      return (
+        <Box flexDirection="column" width={w}>
+          {header}
+          <Text color={C.faint}>no subagents yet</Text>
+        </Box>
+      )
+    }
+    if (useLanes) {
+      const shown = cards.slice(-6)
+      // A lane is its glyph, a label, the bar and a clock: below 34 columns the label narrows, below
+      // 36 the bar, so a 24-column pane still holds it. From 40 they are as they always were.
+      const labelW = Math.min(17, Math.max(7, w - 17))
+      const barW = Math.max(4, w - 11 - labelW)
+      const geo = lanes(shown, now, barW)
+      return (
+        <Box flexDirection="column" width={w}>
+          {header}
+          {cards.length > shown.length ? <Text color={C.faint}>{`+${cards.length - shown.length} earlier`}</Text> : null}
+          {shown.map((c, i) => {
+            const gm = geo[i]
+            const isViewed = viewed === c.id
+            return (
+              <Box columnGap={1}>
+                <Text color={statusColor(c)} bold={isViewed}>
+                  {isViewed ? '▶' : glyph(c)}
+                </Text>
+                <Box width={labelW} flexShrink={0}>
+                  <Button key={`card-${c.id}`} plain hotkey={hotkey(String(i + 1))} label={shorten(cardTitle(c), labelW - 3)} onPress={expandOnPress(c.id)} />
+                </Box>
+                <Box flexShrink={0}>
+                  <Text>
+                    <Text color={C.faint}>{'·'.repeat(gm?.before ?? 0)}</Text>
+                    <Text color={statusColor(c)}>{'━'.repeat(gm?.bar ?? 1)}</Text>
+                    <Text color={C.faint}>{'·'.repeat(gm?.after ?? 0)}</Text>
+                  </Text>
+                </Box>
+                {clock(`lane-clock-${c.id}`, c.spawnedAt, c.endedAt, C.dim)}
+              </Box>
+            )
+          })}
+        </Box>
+      )
+    }
+    const shown = cards.slice(-fit)
+    const cardW = Math.max(20, Math.floor((w - (shown.length - 1)) / shown.length))
+    const centers = shown.map((_, i) => i * (cardW + 1) + Math.floor(cardW / 2))
+    return (
+      <Box flexDirection="column" width={w}>
+        {header}
+        {rail('fan-out', running.length > 0, C.agent, w, centers)}
+        <Box columnGap={1}>
+          {shown.map((c, i) => {
+            const isViewed = viewed === c.id
+            const sameModel = !c.model || prettyModel(c.model) === modelName
+            return (
+              <Box
+                flexDirection="column"
+                borderStyle={isViewed ? 'double' : 'round'}
+                borderColor={c.lastStop === 'max_tokens' ? C.warn : C.agent}
+                borderDimColor={c.status !== 'running' && !isViewed}
+                width={cardW}
+                paddingX={1}
+              >
+                <Button key={`card-${c.id}`} plain hotkey={hotkey(String(i + 1))} label={titleLines(cardTitle(c), cardW - 7, cardW - 4)[0]} onPress={expandOnPress(c.id)} />
+                <Text bold wrap="truncate">
+                  {titleLines(cardTitle(c), cardW - 7, cardW - 4)[1]}
+                </Text>
+                <Text color={C.dim} wrap="truncate">
+                  {sameModel ? c.type : `${c.type} · ${prettyModel(c.model)}`}
+                </Text>
+                <Text dimColor wrap="truncate">
+                  {c.steps > 0 ? `ctx ${kTokens(c.ctx)} · out ${kTokens(c.out)} · ${c.steps} st` : 'starting…'}
+                </Text>
+                <Box columnGap={1}>
+                  <Text color={c.lastStop === 'max_tokens' ? C.warn : statusColor(c)}>
+                    {cardW >= 26 ? `${glyph(c)} ${c.lastStop === 'max_tokens' ? 'max_tokens' : c.status}` : glyph(c)}
+                  </Text>
+                  <Box flexShrink={0}>{clock(`card-clock-${c.id}`, c.spawnedAt, c.endedAt, C.dim)}</Box>
+                </Box>
+              </Box>
+            )
+          })}
+        </Box>
+        {rail('merge', running.length > 0, C.agent, w, centers, true)}
+      </Box>
+    )
+  }
+
+  const expandedCard = cards.find(c => c.id === v.expanded)
+  const expandedPanel = (w: number) =>
+    expandedCard ? (
+      <Box flexDirection="column" borderStyle="single" borderColor={C.agent} paddingX={1} width={w}>
+        <Text bold wrap="wrap">
+          {expandedCard.description || expandedCard.type}
+        </Text>
+        <Text dimColor wrap="truncate">{`${expandedCard.type} · ${prettyModel(expandedCard.model)} · ${expandedCard.status} · ${expandedCard.steps} steps`}</Text>
+        {expandedCard.tools.length === 0 ? <Text color={C.faint}>no tool calls yet</Text> : null}
+        {expandedCard.tools.map(n => (
+          <Text color={n.isError ? C.warn : C.text} wrap="truncate">
+            {`${n.isError ? '✗' : '·'} ${n.text}`}
+          </Text>
+        ))}
+        {expandedCard.answer ? (
+          <Text dimColor wrap="wrap">
+            {`» ${shorten(expandedCard.answer, 240)}`}
+          </Text>
+        ) : null}
+      </Box>
+    ) : null
+
+  // ---- other loops (workflow agents, forks): ids that match no card
+  const loopsPanel = (w: number) => {
+    if (lp.length === 0) return null
+    const active = lp.filter(l => isLoopActive(l, now)).length
+    const dots = lp.slice(-Math.max(4, marksIn(w - 38, isTerminal)))
+    const isNarrow = w < 40
+    return (
+      <Box width={w} columnGap={1}>
+        <Text bold>{isNarrow ? 'loops' : 'other loops'}</Text>
+        <Text dimColor>{isNarrow ? `${lp.length} · ${active} active` : `${lp.length} seen · ${active} active`}</Text>
+        {markRow(
+          dots.map(l => (
+            <Text color={isLoopActive(l, now) ? C.agent : l.isDone ? C.dim : C.faint}>{isLoopActive(l, now) ? '●' : l.isDone ? '✓' : '○'}</Text>
+          )),
+          1,
+        )}
+      </Box>
+    )
+  }
+
+  // ---- receipt: the turn now, or the last one
+  const receiptPanel = (w: number) => {
+    const isReview = t.isReviewing
+    return (
+      <Box flexDirection="column" borderStyle="round" borderColor={C.main} borderDimColor={!m.isRunning && !isReview} paddingX={1} width={w}>
+        {m.isRunning ? (
+          <Box width={w - 4} columnGap={1} overflow="hidden">
+            <Text color={C.main} wrap="truncate">{`◐ back to ${modelName.toLowerCase()} · turn`}</Text>
+            <Box flexShrink={0}>{clock('turn-clock', t.startedAt, null, C.main)}</Box>
+            {w >= 60 ? <Text dimColor wrap="truncate">{`· ${plural(t.edits, 'edit')} · ${plural(t.errors, 'error')}`}</Text> : null}
+          </Box>
+        ) : r ? (
+          line(
+            [
+              { spans: [{ text: r.reason === 'answer' ? '✓' : '✗', color: r.reason === 'answer' ? C.gate : C.warn }] },
+              {
+                spans: [{ text: `last turn ${fmtDuration(r.durationMs)} · ${plural(r.agents, 'agent')} · ${plural(r.edits, 'edit')} · ${plural(r.errors, 'error')}` }],
+                fill: true,
+              },
+              r.costDelta !== null ? { spans: [{ text: `· +${fmtUsd(r.costDelta)}`, color: C.main }] } : null,
+            ],
+            w - 4,
+          )
+        ) : (
+          <Text color={C.faint}>no turn finished yet</Text>
+        )}
+        {isReview ? (
+          <Text color={C.arch} wrap="wrap">
+            {`${cfg.architectLabel.toLowerCase()} reviewing before done (inferred)`}
+          </Text>
+        ) : null}
+      </Box>
+    )
+  }
+
+  // ---- log: whatever rows the other panels leave, 4 to 8
+  // The main box's speed line, the legend's gap and the gap above the log are a row each.
+  const used = 2 + legendGap + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + 3
+  const nLog = logRows(rows, used)
+  const shownLines = (viewed ? lines.filter(l => l.agentId === viewed) : lines).slice(-nLog)
+  const colorOf = (l: LogLine) =>
+    l.kind === 'error' ? C.warn : l.kind === 'consult' ? C.arch : l.who === 'main' ? C.main : l.who === 'gate' ? C.gate : l.who === 'you' ? C.text : C.agent
+  // Below 40 columns a line keeps its minute, not its second, and a shorter name.
+  const logPanel = (w: number) => (
+    <Box flexDirection="column" borderStyle="round" borderColor={C.faint} paddingX={1} marginTop={1} width={w}>
+      <Text dimColor wrap="truncate">
+        {viewed ? 'session log · this agent' : 'session log'}
+      </Text>
+      {shownLines.length === 0 ? <Text color={C.faint}>nothing yet</Text> : null}
+      {shownLines.map(l => (
+        <Box>
+          <Box width={w < 40 ? 6 : 9} flexShrink={0}>
+            <Text color={C.faint}>{w < 40 ? fmtClock(l.at).slice(0, 5) : fmtClock(l.at)}</Text>
+          </Box>
+          <Box width={w < 40 ? 9 : 13} flexShrink={0}>
+            <Text color={colorOf(l)} bold wrap="truncate">
+              {l.who}
+            </Text>
+          </Box>
+          <Text color={l.kind === 'error' ? C.warn : C.text} wrap="truncate">
+            {l.text}
+          </Text>
+        </Box>
+      ))}
+    </Box>
+  )
+
+  const draw = (p: Panel, w: number) =>
+    p === 'main'
+      ? mainPanel(w)
+      : p === 'architect'
+        ? architectPanel(w)
+        : p === 'gate'
+          ? gatePanel(w)
+          : p === 'agents'
+            ? agentsPanel(w)
+            : p === 'loops'
+              ? loopsPanel(w)
+              : p === 'receipt'
+                ? receiptPanel(w)
+                : logPanel(w)
+
+  // Panels with the flow between them; the agents panel draws its own rails.
+  const column = (ps: Panel[], w: number) => (
+    <Box flexDirection="column" width={w}>
+      {ps.map((p, i) => {
+        const prev = ps[i - 1]
+        const link =
+          i === 0 || p === 'agents' || prev === 'agents' || p === 'log' || p === 'loops' || prev === 'loops'
+            ? null
+            : rail(`link-${p}`, p === 'architect' ? advising : m.isRunning, p === 'architect' ? C.arch : C.main, w)
+        return (
+          <Box flexDirection="column">
+            {link}
+            {draw(p, w)}
+            {p === 'agents' ? expandedPanel(w) : null}
+          </Box>
+        )
+      })}
+    </Box>
+  )
+
+  // Desktop draws the agents' time axis as SVG under the panels.
+  const svgLanes =
+    e.surface !== 'terminal' && cards.length > 0
+      ? (() => {
+          const { Svg } = $.ui.resolve(e)
+          const rowH = 18
+          const pxW = 520
+          const geo = lanes(cards.slice(-10), now, 100)
+          const rects = cards
+            .slice(-10)
+            .map((c, i) => {
+              const gm = geo[i]
+              const x = 150 + ((gm?.before ?? 0) / 100) * (pxW - 160)
+              const wpx = Math.max(3, ((gm?.bar ?? 1) / 100) * (pxW - 160))
+              const fill = c.status === 'running' ? SVG_COLORS.running : c.status === 'done' ? SVG_COLORS.done : c.status === 'failed' ? SVG_COLORS.failed : SVG_COLORS.other
+              const label = shorten(cardTitle(c), 22).replace(/[<&>]/g, '')
+              return `<text x="4" y="${i * rowH + 13}" font-size="11" fill="${SVG_COLORS.label}">${label}</text><rect x="${x}" y="${i * rowH + 4}" width="${wpx}" height="10" rx="3" fill="${fill}"/>`
+            })
+            .join('')
+          const svgH = Math.min(10, cards.length) * rowH + 4
+          // No width or height on the element: it takes the markup's own width up to the pane's and
+          // scales down to fit a narrow one, rather than running past it at 520 pixels.
+          return (
+            <Svg
+              source={`<svg xmlns="http://www.w3.org/2000/svg" width="${pxW}" height="${svgH}" viewBox="0 0 ${pxW} ${svgH}">${rects}</svg>`}
+              alt={`${cards.length} agents on a time axis`}
+            />
+          )
+        })()
+      : null
+
+  // Inline above the prompt (the terminal's main screen), the pane is a summary of at most 8 rows.
+  const isMini = layout === 'mini' || (layout === 'auto' && e.props.placement === 'inline')
+  if (isMini) {
+    const live = [...cards.filter(c => c.status === 'running'), ...cards.filter(c => c.status !== 'running').reverse()].slice(0, 3)
+    const counts = `${s.rule} allowed · ${s.cleared} ${decider}${s.ask > 0 ? ` · ${s.ask} pending` : ''} · ${s.deny} denied`
+    const strip = g.recent.slice(-Math.max(4, marksIn(W - cfg.gateLabel.length - 2 - counts.length, isTerminal)))
+    const mg = ctxFill.pct !== null ? gauge(ctxFill.pct, 6) : null
+    return (
+      <Box flexDirection="column" width={W}>
+        {line(
+          [
+            {
+              spans: [
+                { text: modelName, color: C.main, bold: true },
+                { text: m.isRunning ? ' ● working' : ' ○ idle', color: m.isRunning ? C.main : C.dim },
+              ],
+            },
+            mg
+              ? {
+                  spans: [
+                    { text: '· ctx ', dim: true },
+                    { text: mg.on, color: (ctxFill.pct ?? 0) >= 80 ? C.warn : C.main },
+                    { text: mg.off, color: C.faint },
+                    { text: ` ${Math.round(ctxFill.pct ?? 0)}%` },
+                    ...(u.compactions > 0 ? [{ text: ` ${compactMark(u)}`, color: C.amber }] : []),
+                  ],
+                }
+              : u.compactions > 0
+                ? { spans: [{ text: compactMark(u), color: C.amber }] }
+                : null,
+            u.costUsd !== null ? { spans: [{ text: `· ${fmtUsd(u.costUsd)}`, dim: true }] } : null,
+            showArchitect ? { spans: [{ text: `· ${cfg.architectLabel.toLowerCase()} ${advising ? 'advising' : a.consults.length}`, color: C.arch }] } : null,
+          ],
+          W,
+        )}
+        {strip.length > 0 ? (
+          <Box columnGap={1}>
+            <Text dimColor>{cfg.gateLabel.toLowerCase()}</Text>
+            {markRow(strip.map(checkMark))}
+            <Text color={s.deny > 0 ? C.warn : s.ask > 0 ? C.amber : C.dim} wrap="truncate">
+              {counts}
+            </Text>
+          </Box>
+        ) : null}
+        {live.map(c => (
+          <Box columnGap={1}>
+            <Text color={statusColor(c)}>{glyph(c)}</Text>
+            <Box width={Math.max(6, W - 30)} flexShrink={0}>
+              <Text wrap="truncate">{cardTitle(c)}</Text>
+            </Box>
+            {c.steps > 0 ? <Text dimColor>{`ctx ${kTokens(c.ctx)}`}</Text> : null}
+            {clock(`mini-clock-${c.id}`, c.spawnedAt, c.endedAt, C.dim)}
+          </Box>
+        ))}
+        {cards.length > live.length ? (
+          <Text color={C.faint} wrap="truncate">{`+${cards.length - live.length} more agents · /flightdeck layout compact for all`}</Text>
+        ) : null}
+        {lp.length > 0 ? <Text dimColor wrap="truncate">{`other loops ${lp.length} · ${lp.filter(l => isLoopActive(l, now)).length} active`}</Text> : null}
+        {!m.isRunning && r ? (
+          <Text dimColor wrap="truncate">
+            {`last turn ${fmtDuration(r.durationMs)} · ${plural(r.agents, 'agent')} · ${plural(r.edits, 'edit')} · ${plural(r.errors, 'error')}${r.costDelta !== null ? ` · +${fmtUsd(r.costDelta)}` : ''}`}
+          </Text>
+        ) : null}
+      </Box>
+    )
+  }
+
+  const legend = fitLegend(
+    [
+      { label: 'main', color: C.main },
+      { label: 'agents', color: C.agent },
+      { label: cfg.gateLabel.toLowerCase(), color: C.gate },
+      ...(showArchitect ? [{ label: cfg.architectLabel.toLowerCase(), color: C.arch }] : []),
+    ],
+    W,
+  )
+
+  const body = isWide ? (
+    <Box flexDirection="column">
+      <Box columnGap={2}>
+        {column(panels.filter(p => p === 'main' || p === 'architect' || p === 'gate'), colW)}
+        {column(panels.filter(p => p === 'agents' || p === 'loops' || p === 'receipt'), colW)}
+      </Box>
+      {panels.includes('log') ? logPanel(W) : null}
+    </Box>
+  ) : (
+    column(panels, W)
+  )
+
+  return (
+    <Box flexDirection="column" width={W}>
+      {/* Below 40 columns the frame's own title names the pane, so the header starts at the model. */}
+      {line(
+        [
+          W >= 40 ? { spans: [{ text: 'FLIGHTDECK', bold: true }, { text: ' ·', color: C.dim, bold: true }] } : null,
+          { spans: [{ text: modelName.toUpperCase(), color: C.main, bold: true }, { text: m.isRunning ? ' WORKS' : ' IDLE', bold: true }] },
+          showArchitect
+            ? {
+                spans: [
+                  { text: '· ', color: C.dim, bold: true },
+                  { text: cfg.architectLabel, color: C.arch, bold: true },
+                  { text: advising ? ' ADVISING' : ' ON CALL', bold: true },
+                ],
+              }
+            : null,
+        ],
+        W,
+        1,
+        'center',
+      )}
+      <Box key="legend" justifyContent="center" columnGap={2} marginBottom={legendGap}>
+        {legend.map(l => (
+          <Box flexShrink={0}>
+            <Text>
+              <Text color={l.color}>■</Text>
+              <Text dimColor>{` ${l.label}`}</Text>
+            </Text>
+          </Box>
+        ))}
+      </Box>
+      {body}
+      {svgLanes}
+    </Box>
+  )
 }
 
 // ---------------------------------------------------------------- hooks
@@ -277,7 +1056,7 @@ export const register: Register = (on, options) => {
         limits: u.rateLimits.map(limitOf),
       }))
     }
-    if (cfg.openOnStart) void openPane($, cfg).catch(() => undefined)
+    if (cfg.openOnStart && !(await readPlacement($, PLUGIN))) void openPane($, cfg).catch(() => undefined)
     await refreshStatus($, cfg)
     const done = await next(e)
     if (resumedWindow > 0) {
@@ -299,6 +1078,11 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'flightdeck' }, async ($, e) => {
     const [verb = 'open', arg = ''] = e.args.trim().split(/\s+/)
+    const placement = await readPlacement($, PLUGIN)
+    // Every verb but reset and layout opens or closes the pane, which a cell replaces.
+    if (placement && verb !== 'reset' && verb !== 'layout') {
+      return { text: `Flightdeck is drawn in ${cellOf(placement)}. /grid place - ${placement.cell} empties the cell and opens its own pane again.` }
+    }
     if (verb === 'close') {
       await $.ui.close({ id: PANE })
       return { text: 'Flightdeck closed.' }
@@ -312,6 +1096,7 @@ export const register: Register = (on, options) => {
       const layout: Layout | null = arg === 'compact' || arg === 'wide' || arg === 'auto' || arg === 'mini' ? arg : null
       if (!layout) return { text: 'Usage: /flightdeck layout auto|compact|wide|mini' }
       await update($, view, v => ({ ...normalize(DEFAULT_VIEW, v), layout }))
+      if (placement) return { text: `Flightdeck layout: ${layout}, in ${cellOf(placement)}.` }
       const opened = await openPane($, cfg)
       return { text: opened.isPlaced ? `Flightdeck layout: ${layout}.` : `Layout set to ${layout}; the pane is not shown yet: ${opened.reason}` }
     }
@@ -653,7 +1438,9 @@ export const register: Register = (on, options) => {
   const faulted = new Set<string>()
   on('ui.fault', async ($, e, next) => {
     const key = faultKey(e.surface, e.module)
-    if (e.requestId === PANE && !faulted.has(key)) {
+    // The deck draws in its own pane, or in the grid pane of its pane-grid cell.
+    const isDeck = e.requestId === PANE || (await readPlacement($, PLUGIN))?.requestId === e.requestId
+    if (isDeck && !faulted.has(key)) {
       faulted.add(key)
       $.ui.log(`flightdeck: ${e.module} faulted on ${e.surface} (${e.phase}: ${e.reason}); drawing it without animation`)
       $.ui.invalidate('ui.render')
@@ -668,735 +1455,8 @@ export const register: Register = (on, options) => {
   let monoRead: Promise<boolean> | null = null
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const els = $.ui.resolve(e)
-    const { Box, Text, Button } = els
-    const hasClient = 'Client' in els
-    const hasRail = hasClient && !faulted.has(faultKey(e.surface, 'rail.tsx'))
-    const hasClock = hasClient && !faulted.has(faultKey(e.surface, 'elapsed.tsx'))
-    const [m, u, a, g, cards, lp, lines, t, r, v, now, mono] = await Promise.all([
-      getMain($),
-      getUsage($),
-      getArchitect($),
-      getGate($),
-      getCards($),
-      getLoops($),
-      getLog($),
-      getTurn($),
-      read($, receipt),
-      getView($),
-      $.clock.now(),
-      (monoRead ??= readMono($)),
-    ])
-    // The body's own width, down to the narrowest dock Claude Code seats (24): a wider drawing is cut off at the frame.
-    const W = Math.max(24, e.props.bodyColumns)
-    const layout = v.layout ?? cfg.layout
-    const isWide = layout === 'wide' || (layout === 'auto' && W >= 110)
-    const colW = isWide ? Math.floor((W - 2) / 2) : W
-    const modelName = prettyModel(m.model)
-    const viewed = e.props.view?.agentId ?? null
-    const advising = isAdvising(a)
-    const running = cards.filter(c => c.status === 'running')
-    const showArchitect = a.consults.length > 0 || a.ids.length > 0
-    const motion = cfg.motion && hasRail
-    // A panel with nothing to show yet takes no room: most sessions never spawn an agent.
-    const isEmpty: Record<Panel, boolean> = {
-      main: false,
-      architect: !showArchitect,
-      gate: g.recent.length === 0 && gateSummary(g).total === 0,
-      agents: cards.length === 0,
-      loops: lp.length === 0,
-      receipt: !m.isRunning && !r,
-      log: false,
-    }
-    const panels = cfg.panels.filter(p => !isEmpty[p])
-    const decider = m.mode === 'auto' ? 'classifier' : 'you'
-
-    // A connector between panels: animated while its flow is live, a dim line otherwise.
-    const rail = (key: string, active: boolean, color: string, width: number, marks: number[] = [], isMerge = false) =>
-      motion ? (
-        <els.Client
-          key={key}
-          module="./rail.tsx"
-          width={width}
-          height={1}
-          props={{ active, width, color, dim: C.faint, marks, isMerge, mono }}
-        />
-      ) : (
-        <Text color={C.faint} {...(mono ? { mono: true } : {})}>
-          {'─'.repeat(Math.max(1, width))}
-        </Text>
-      )
-
-    // A start time of 0 is unknown (state saved before it was recorded): no clock, not decades.
-    const clock = (key: string, since: number, endAt: number | null, color: string) =>
-      since <= 0 ? (
-        <Text color={color}>—</Text>
-      ) : hasClock ? (
-        <els.Client key={key} module="./elapsed.tsx" props={{ since, now, endAt, color }} />
-      ) : (
-        <Text color={color}>{fmtTimer((endAt ?? now) - since)}</Text>
-      )
-
-    const isTerminal = e.surface === 'terminal'
-    // A row of marks (gate checks, loop dots), sized by `marksIn`. Should a surface draw them wider
-    // still, the row is cut at its box rather than running past it.
-    const markRow = (marks: RenderChildren, lead = 0) => (
-      <Box overflow="hidden" {...(lead ? { marginLeft: lead } : {})}>
-        <Text wrap="truncate-start">{marks}</Text>
-      </Box>
-    )
-    // A terminal's border row stands apart from the text above it; a graphical surface draws the
-    // border flush against it, so the legend keeps one row of air there.
-    const legendGap = isTerminal ? 0 : 1
-
-    // A line of coloured pieces, drawn as a row of boxes the way the log draws its lines. A Text nesting
-    // coloured Texts truncates as one line in a terminal, but the desktop app wraps each nested piece on its
-    // own, lays truncating ones out as blocks of their own, and collapses runs of spaces. So pieces sit `gap`
-    // cells apart (a piece's `lead` adds more), each keeps its width, and pieces that don't fit in `room` are
-    // left out from the end; or a piece marked `fill` (one span) truncates to what the others leave.
-    type Span = { text: string; color?: string; dim?: boolean; bold?: boolean }
-    type Piece = { spans: Span[]; lead?: number; fill?: boolean }
-    const styleOf = (s: Span) => ({ ...(s.color ? { color: s.color } : {}), ...(s.dim ? { dimColor: true } : {}), ...(s.bold ? { bold: true } : {}) })
-    const widthOf = (p: Piece) => p.spans.reduce((n, s) => n + cellWidth(s.text), 0)
-    const line = (pieces: (Piece | null)[], room: number, gap = 1, justify?: 'center') => {
-      const all = pieces.filter((p): p is Piece => p !== null)
-      const shown = all.some(p => p.fill) ? all : all.slice(0, piecesThatFit(all.map(p => ({ width: widthOf(p), lead: p.lead })), room, gap))
-      return (
-        <Box width={room} columnGap={gap} overflow="hidden" {...(justify ? { justifyContent: justify } : {})}>
-          {shown.map(p => {
-            const lead = p.lead ? { marginLeft: p.lead } : {}
-            if (p.fill && p.spans[0]) {
-              return (
-                <Text {...styleOf(p.spans[0])} wrap="truncate">
-                  {p.spans[0].text}
-                </Text>
-              )
-            }
-            return (
-              <Box flexShrink={0} {...lead}>
-                {p.spans.length === 1 && p.spans[0] ? <Text {...styleOf(p.spans[0])}>{p.spans[0].text}</Text> : <Text>{p.spans.map(s => <Text {...styleOf(s)}>{s.text}</Text>)}</Text>}
-              </Box>
-            )
-          })}
-        </Box>
-      )
-    }
-
-    // ---- main
-    const effortN = { low: 1, medium: 2, high: 3, xhigh: 4, max: 4 }[m.effort] ?? 0
-    const ctxFill = contextFill(u)
-    const ctxGauge = ctxFill.pct !== null ? gauge(ctxFill.pct, 10) : null
-    const mainPanel = (w: number) => (
-      <Box flexDirection="column" borderStyle="round" borderColor={C.main} paddingX={1} width={w}>
-        <Box justifyContent="space-between">
-          <Text color={C.main} bold wrap="truncate">
-            {modelName} · main
-          </Text>
-          <Box flexShrink={0}>
-            <Text color={m.isRunning ? C.main : C.dim}>{m.isRunning ? '● working' : '○ idle'}</Text>
-          </Box>
-        </Box>
-        {line(
-          [
-            {
-              spans: [
-                { text: 'effort ', dim: true },
-                { text: `${'▮'.repeat(effortN) + '▯'.repeat(4 - effortN)} `, color: C.main },
-                { text: m.effort || '—', color: C.main, bold: true },
-              ],
-            },
-            m.mode ? { spans: [{ text: `mode ${m.mode}`, dim: true }] } : null,
-            { spans: [{ text: `${m.steps} req`, dim: true }] },
-          ],
-          w - 4,
-          3,
-        )}
-        {ctxGauge
-          ? line(
-              [
-                {
-                  spans: [
-                    { text: 'ctx ', dim: true },
-                    { text: ctxGauge.on, color: ctxFill.pct !== null && ctxFill.pct >= 80 ? C.warn : C.main },
-                    { text: ctxGauge.off, color: C.faint },
-                    { text: ` ${Math.round(ctxFill.pct ?? 0)}%`, bold: true },
-                  ],
-                },
-                u.tokens !== null ? { spans: [{ text: `${kTokens(u.tokens)}/${kTokens(ctxFill.window)}`, dim: true }] } : null,
-                u.compactions > 0 ? { spans: [{ text: compactMark(u), color: C.amber }], lead: 1 } : null,
-                // Left out first when the line is short; the ~ in the mark still says it.
-                u.compactions > 0 && u.isCompactEstimate ? { spans: [{ text: '(estimated)', color: C.faint }] } : null,
-              ],
-              w - 4,
-            )
-          : null}
-        {u.costUsd !== null || u.limits.length > 0
-          ? line(
-              [
-                u.costUsd !== null ? { spans: [{ text: fmtUsd(u.costUsd), color: C.text }] } : null,
-                ...u.limits.slice(0, 2).map((l, i): Piece => {
-                  const lg = gauge(l.pct, 5)
-                  // The time to each reset where the line has room for it: both windows fit from 56 columns,
-                  // so a wide pane's half column (59 at 120) has them; a window that doesn't fit is left out.
-                  const resetIn = w >= 56 ? fmtResetIn(l.resetsAt, now) : ''
-                  return {
-                    lead: i > 0 ? 1 : u.costUsd !== null ? 2 : 0,
-                    spans: [
-                      { text: `${limitLabel(l.kind)} `, dim: true },
-                      { text: lg.on, color: l.pct >= 80 ? C.warn : C.main },
-                      { text: lg.off, color: C.faint },
-                      { text: ` ${Math.round(l.pct)}%${resetIn ? ` ↻${resetIn}` : ''}`, dim: true },
-                    ],
-                  }
-                }),
-              ],
-              w - 4,
-            )
-          : null}
-        {m.speed ? <Text dimColor wrap="truncate">{`last req  ${fmtSpeed(m.speed)}`}</Text> : null}
-      </Box>
-    )
-
-    // ---- architect
-    const lastConsult = a.consults[a.consults.length - 1]
-    const architectPanel = (w: number) => {
-      // Both ends are anchors (the first consult, now): should it run past its box, it asks to lose the middle.
-      const tl = consultTimeline(a, now, Math.max(8, w - 4))
-      return (
-        <Box flexDirection="column" borderStyle="round" borderColor={C.arch} paddingX={1} width={w}>
-          <Box justifyContent="space-between">
-            <Text color={C.arch} bold wrap="truncate">
-              {cfg.architectLabel} · {advising ? 'advising' : 'on call'}
-            </Text>
-            <Box flexShrink={0}>
-              <Text>
-                <Text dimColor>consults </Text>
-                <Text color={C.arch} bold>
-                  {a.consults.length}
-                </Text>
-              </Text>
-            </Box>
-          </Box>
-          <Text color={C.arch} wrap="truncate-middle">
-            {tl}
-          </Text>
-          {lastConsult ? (
-            <Text dimColor wrap="truncate">
-              {advising
-                ? `consulting since ${fmtClock(lastConsult.at)}`
-                : `last ${fmtDuration(now - (lastConsult.endAt ?? lastConsult.at))} ago · took ${fmtDuration((lastConsult.endAt ?? now) - lastConsult.at)}`}
-            </Text>
-          ) : (
-            <Text dimColor>not consulted yet</Text>
-          )}
-          {cfg.moments ? (
-            <Box flexWrap="wrap" columnGap={2}>
-              {(['before a plan', 'error repeats', 'before done'] as const).map(mo => {
-                const isOn = lastConsult?.moment === mo
-                return (
-                  <Text color={isOn ? C.arch : C.dim} bold={isOn}>
-                    {isOn ? '◆' : '◇'} {mo}
-                  </Text>
-                )
-              })}
-              <Text color={C.faint}>(inferred)</Text>
-            </Box>
-          ) : null}
-          {a.lastAdvice ? (
-            <Text color={C.arch} wrap="truncate">
-              » {a.lastAdvice}
-            </Text>
-          ) : null}
-        </Box>
-      )
-    }
-
-    // ---- gate
-    const s = gateSummary(g)
-    const verdictColor = (c: Check) =>
-      c.verdict === 'rule' ? C.gate : c.verdict === 'cleared' ? C.cleared : c.verdict === 'ask' ? C.amber : C.warn
-    const checkMark = (c: Check) => (
-      <Text color={verdictColor(c)} dimColor={c.inSubagent}>
-        {c.verdict === 'deny' ? '✗' : '■'}
-      </Text>
-    )
-    const gatePanel = (w: number) => {
-      const strip = g.recent.slice(-Math.max(8, marksIn(w - 4, isTerminal)))
-      const open = v.gateOpen
-      // The totals in words where they all fit, in numbers alone where they don't: the colours say which is which.
-      const totalsOf = (isShort: boolean): Piece[] => [
-        { spans: [{ text: '■', color: C.gate }, { text: isShort ? ` ${s.rule}` : ` ${s.rule} allowed`, dim: true }] },
-        { spans: [{ text: '■', color: C.cleared }, { text: isShort ? ` ${s.cleared}` : ` ${s.cleared} ${decider}`, dim: true }] },
-        ...(s.ask > 0 ? [{ spans: [{ text: isShort ? `■ ${s.ask}` : `■ ${s.ask} pending`, color: C.amber }] }] : []),
-        { spans: [{ text: isShort ? `✗ ${s.deny}` : `✗ ${s.deny} denied`, color: s.deny > 0 ? C.warn : C.dim }] },
-      ]
-      const words = totalsOf(false)
-      const isShort = piecesThatFit(words.map(p => ({ width: widthOf(p) })), w - 4, 2) < words.length
-      const totals = isShort ? totalsOf(true) : words
-      return (
-        <Box flexDirection="column" borderStyle="round" borderColor={C.gate} paddingX={1} width={w}>
-          <Box justifyContent="space-between">
-            <Text color={C.gate} bold wrap="truncate">
-              {cfg.gateLabel} · permissions
-            </Text>
-            <Box flexShrink={0}>
-              <Text dimColor>{`${s.total} checks`}</Text>
-            </Box>
-          </Box>
-          {strip.length === 0 ? <Text color={C.faint}>no checks yet</Text> : markRow(strip.map(checkMark))}
-          {line([...totals, !isShort && w >= 80 && g.recent.some(c => c.inSubagent) ? { spans: [{ text: 'dim: in subagents', color: C.faint }] } : null], w - 4, 2)}
-          {/* Below about 44 columns the three rows' buttons take two lines rather than run past the box. */}
-          <Box columnGap={2} flexWrap="wrap">
-            {(['file', 'shell', 'other'] as const).map((b: Bucket) => {
-              const tl = g.totals[b]
-              const n = tl.rule + tl.ask + tl.cleared + tl.deny
-              return (
-                <Button
-                  key={`gate-${b}`}
-                  plain
-                  hotkey={b[0]}
-                  label={`${b} ${n}${open === b ? ' ▾' : ''}`}
-                  dimColor={n === 0}
-                  onPress={() => update($, view, x => ({ ...normalize(DEFAULT_VIEW, x), gateOpen: normalize(DEFAULT_VIEW, x).gateOpen === b ? null : b }))}
-                />
-              )
-            })}
-          </Box>
-          {open
-            ? g.recent
-                .filter(c => c.bucket === open)
-                .slice(-5)
-                .map(c => (
-                  // The verdict sits in a box of its own width, not padded with spaces, which a graphical surface collapses.
-                  <Box width={w - 4} columnGap={1} overflow="hidden">
-                    <Box width={12} flexShrink={0}>
-                      <Text>
-                        <Text color={verdictColor(c)}>{c.verdict === 'deny' ? '✗ ' : '■ '}</Text>
-                        <Text color={C.dim}>{c.verdict === 'rule' ? 'allowed' : c.verdict === 'cleared' ? decider : c.verdict === 'ask' ? 'pending' : 'denied'}</Text>
-                      </Text>
-                    </Box>
-                    <Text dimColor={c.inSubagent} wrap="truncate">
-                      {shorten(c.detail, Math.max(10, w - 18))}
-                    </Text>
-                  </Box>
-                ))
-            : null}
-        </Box>
-      )
-    }
-
-    // ---- agents: cards up to the limit, swimlanes beyond it
-    const statusColor = (c: AgentCard) => (c.status === 'failed' ? C.warn : c.status === 'done' ? C.gate : C.agent)
-    const glyph = (c: AgentCard) => (c.status === 'running' ? '◐' : c.status === 'done' ? '✓' : c.status === 'failed' ? '✗' : '■')
-    const expandOnPress = (id: string) => () =>
-      update($, view, x => ({ ...normalize(DEFAULT_VIEW, x), expanded: normalize(DEFAULT_VIEW, x).expanded === id ? null : id }))
-
-    const agentsPanel = (w: number) => {
-      // Cards need 20 columns each; when the pane can't hold the limit, lanes take over.
-      const fit = Math.max(1, Math.min(cfg.maxCards, Math.floor((w + 1) / 21)))
-      const useLanes = cards.length > fit
-      const isNarrow = w < 40
-      const header = (
-        <Box justifyContent="space-between" width={w}>
-          <Text bold wrap="truncate">
-            {isNarrow ? `agents · ${running.length}/${cards.length}` : `agents · ${running.length} running · ${cards.length} total`}
-          </Text>
-          {cards.length > 0 ? (
-            <Box flexShrink={0}>
-              <Text color={C.faint}>{`1-${Math.min(cards.length, useLanes ? 6 : fit)}${isNarrow ? '' : ' expand'}`}</Text>
-            </Box>
-          ) : null}
-        </Box>
-      )
-      if (cards.length === 0) {
-        return (
-          <Box flexDirection="column" width={w}>
-            {header}
-            <Text color={C.faint}>no subagents yet</Text>
-          </Box>
-        )
-      }
-      if (useLanes) {
-        const shown = cards.slice(-6)
-        // A lane is its glyph, a label, the bar and a clock: below 34 columns the label narrows, below
-        // 36 the bar, so a 24-column pane still holds it. From 40 they are as they always were.
-        const labelW = Math.min(17, Math.max(7, w - 17))
-        const barW = Math.max(4, w - 11 - labelW)
-        const geo = lanes(shown, now, barW)
-        return (
-          <Box flexDirection="column" width={w}>
-            {header}
-            {cards.length > shown.length ? <Text color={C.faint}>{`+${cards.length - shown.length} earlier`}</Text> : null}
-            {shown.map((c, i) => {
-              const gm = geo[i]
-              const isViewed = viewed === c.id
-              return (
-                <Box columnGap={1}>
-                  <Text color={statusColor(c)} bold={isViewed}>
-                    {isViewed ? '▶' : glyph(c)}
-                  </Text>
-                  <Box width={labelW} flexShrink={0}>
-                    <Button key={`card-${c.id}`} plain hotkey={String(i + 1)} label={shorten(cardTitle(c), labelW - 3)} onPress={expandOnPress(c.id)} />
-                  </Box>
-                  <Box flexShrink={0}>
-                    <Text>
-                      <Text color={C.faint}>{'·'.repeat(gm?.before ?? 0)}</Text>
-                      <Text color={statusColor(c)}>{'━'.repeat(gm?.bar ?? 1)}</Text>
-                      <Text color={C.faint}>{'·'.repeat(gm?.after ?? 0)}</Text>
-                    </Text>
-                  </Box>
-                  {clock(`lane-clock-${c.id}`, c.spawnedAt, c.endedAt, C.dim)}
-                </Box>
-              )
-            })}
-          </Box>
-        )
-      }
-      const shown = cards.slice(-fit)
-      const cardW = Math.max(20, Math.floor((w - (shown.length - 1)) / shown.length))
-      const centers = shown.map((_, i) => i * (cardW + 1) + Math.floor(cardW / 2))
-      return (
-        <Box flexDirection="column" width={w}>
-          {header}
-          {rail('fan-out', running.length > 0, C.agent, w, centers)}
-          <Box columnGap={1}>
-            {shown.map((c, i) => {
-              const isViewed = viewed === c.id
-              const sameModel = !c.model || prettyModel(c.model) === modelName
-              return (
-                <Box
-                  flexDirection="column"
-                  borderStyle={isViewed ? 'double' : 'round'}
-                  borderColor={c.lastStop === 'max_tokens' ? C.warn : C.agent}
-                  borderDimColor={c.status !== 'running' && !isViewed}
-                  width={cardW}
-                  paddingX={1}
-                >
-                  <Button key={`card-${c.id}`} plain hotkey={String(i + 1)} label={titleLines(cardTitle(c), cardW - 7, cardW - 4)[0]} onPress={expandOnPress(c.id)} />
-                  <Text bold wrap="truncate">
-                    {titleLines(cardTitle(c), cardW - 7, cardW - 4)[1]}
-                  </Text>
-                  <Text color={C.dim} wrap="truncate">
-                    {sameModel ? c.type : `${c.type} · ${prettyModel(c.model)}`}
-                  </Text>
-                  <Text dimColor wrap="truncate">
-                    {c.steps > 0 ? `ctx ${kTokens(c.ctx)} · out ${kTokens(c.out)} · ${c.steps} st` : 'starting…'}
-                  </Text>
-                  <Box columnGap={1}>
-                    <Text color={c.lastStop === 'max_tokens' ? C.warn : statusColor(c)}>
-                      {cardW >= 26 ? `${glyph(c)} ${c.lastStop === 'max_tokens' ? 'max_tokens' : c.status}` : glyph(c)}
-                    </Text>
-                    <Box flexShrink={0}>{clock(`card-clock-${c.id}`, c.spawnedAt, c.endedAt, C.dim)}</Box>
-                  </Box>
-                </Box>
-              )
-            })}
-          </Box>
-          {rail('merge', running.length > 0, C.agent, w, centers, true)}
-        </Box>
-      )
-    }
-
-    const expandedCard = cards.find(c => c.id === v.expanded)
-    const expandedPanel = (w: number) =>
-      expandedCard ? (
-        <Box flexDirection="column" borderStyle="single" borderColor={C.agent} paddingX={1} width={w}>
-          <Text bold wrap="wrap">
-            {expandedCard.description || expandedCard.type}
-          </Text>
-          <Text dimColor wrap="truncate">{`${expandedCard.type} · ${prettyModel(expandedCard.model)} · ${expandedCard.status} · ${expandedCard.steps} steps`}</Text>
-          {expandedCard.tools.length === 0 ? <Text color={C.faint}>no tool calls yet</Text> : null}
-          {expandedCard.tools.map(n => (
-            <Text color={n.isError ? C.warn : C.text} wrap="truncate">
-              {`${n.isError ? '✗' : '·'} ${n.text}`}
-            </Text>
-          ))}
-          {expandedCard.answer ? (
-            <Text dimColor wrap="wrap">
-              {`» ${shorten(expandedCard.answer, 240)}`}
-            </Text>
-          ) : null}
-        </Box>
-      ) : null
-
-    // ---- other loops (workflow agents, forks): ids that match no card
-    const loopsPanel = (w: number) => {
-      if (lp.length === 0) return null
-      const active = lp.filter(l => isLoopActive(l, now)).length
-      const dots = lp.slice(-Math.max(4, marksIn(w - 38, isTerminal)))
-      const isNarrow = w < 40
-      return (
-        <Box width={w} columnGap={1}>
-          <Text bold>{isNarrow ? 'loops' : 'other loops'}</Text>
-          <Text dimColor>{isNarrow ? `${lp.length} · ${active} active` : `${lp.length} seen · ${active} active`}</Text>
-          {markRow(
-            dots.map(l => (
-              <Text color={isLoopActive(l, now) ? C.agent : l.isDone ? C.dim : C.faint}>{isLoopActive(l, now) ? '●' : l.isDone ? '✓' : '○'}</Text>
-            )),
-            1,
-          )}
-        </Box>
-      )
-    }
-
-    // ---- receipt: the turn now, or the last one
-    const receiptPanel = (w: number) => {
-      const isReview = t.isReviewing
-      return (
-        <Box flexDirection="column" borderStyle="round" borderColor={C.main} borderDimColor={!m.isRunning && !isReview} paddingX={1} width={w}>
-          {m.isRunning ? (
-            <Box width={w - 4} columnGap={1} overflow="hidden">
-              <Text color={C.main} wrap="truncate">{`◐ back to ${modelName.toLowerCase()} · turn`}</Text>
-              <Box flexShrink={0}>{clock('turn-clock', t.startedAt, null, C.main)}</Box>
-              {w >= 60 ? <Text dimColor wrap="truncate">{`· ${plural(t.edits, 'edit')} · ${plural(t.errors, 'error')}`}</Text> : null}
-            </Box>
-          ) : r ? (
-            line(
-              [
-                { spans: [{ text: r.reason === 'answer' ? '✓' : '✗', color: r.reason === 'answer' ? C.gate : C.warn }] },
-                {
-                  spans: [{ text: `last turn ${fmtDuration(r.durationMs)} · ${plural(r.agents, 'agent')} · ${plural(r.edits, 'edit')} · ${plural(r.errors, 'error')}` }],
-                  fill: true,
-                },
-                r.costDelta !== null ? { spans: [{ text: `· +${fmtUsd(r.costDelta)}`, color: C.main }] } : null,
-              ],
-              w - 4,
-            )
-          ) : (
-            <Text color={C.faint}>no turn finished yet</Text>
-          )}
-          {isReview ? (
-            <Text color={C.arch} wrap="wrap">
-              {`${cfg.architectLabel.toLowerCase()} reviewing before done (inferred)`}
-            </Text>
-          ) : null}
-        </Box>
-      )
-    }
-
-    // ---- log: whatever rows the other panels leave, 4 to 8
-    // The main box's speed line, the legend's gap and the gap above the log are a row each.
-    const used = 2 + legendGap + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + 3
-    const bodyRows = e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 40
-    const nLog = logRows(bodyRows, used)
-    const shownLines = (viewed ? lines.filter(l => l.agentId === viewed) : lines).slice(-nLog)
-    const colorOf = (l: LogLine) =>
-      l.kind === 'error' ? C.warn : l.kind === 'consult' ? C.arch : l.who === 'main' ? C.main : l.who === 'gate' ? C.gate : l.who === 'you' ? C.text : C.agent
-    // Below 40 columns a line keeps its minute, not its second, and a shorter name.
-    const logPanel = (w: number) => (
-      <Box flexDirection="column" borderStyle="round" borderColor={C.faint} paddingX={1} marginTop={1} width={w}>
-        <Text dimColor wrap="truncate">
-          {viewed ? 'session log · this agent' : 'session log'}
-        </Text>
-        {shownLines.length === 0 ? <Text color={C.faint}>nothing yet</Text> : null}
-        {shownLines.map(l => (
-          <Box>
-            <Box width={w < 40 ? 6 : 9} flexShrink={0}>
-              <Text color={C.faint}>{w < 40 ? fmtClock(l.at).slice(0, 5) : fmtClock(l.at)}</Text>
-            </Box>
-            <Box width={w < 40 ? 9 : 13} flexShrink={0}>
-              <Text color={colorOf(l)} bold wrap="truncate">
-                {l.who}
-              </Text>
-            </Box>
-            <Text color={l.kind === 'error' ? C.warn : C.text} wrap="truncate">
-              {l.text}
-            </Text>
-          </Box>
-        ))}
-      </Box>
-    )
-
-    const draw = (p: Panel, w: number) =>
-      p === 'main'
-        ? mainPanel(w)
-        : p === 'architect'
-          ? architectPanel(w)
-          : p === 'gate'
-            ? gatePanel(w)
-            : p === 'agents'
-              ? agentsPanel(w)
-              : p === 'loops'
-                ? loopsPanel(w)
-                : p === 'receipt'
-                  ? receiptPanel(w)
-                  : logPanel(w)
-
-    // Panels with the flow between them; the agents panel draws its own rails.
-    const column = (ps: Panel[], w: number) => (
-      <Box flexDirection="column" width={w}>
-        {ps.map((p, i) => {
-          const prev = ps[i - 1]
-          const link =
-            i === 0 || p === 'agents' || prev === 'agents' || p === 'log' || p === 'loops' || prev === 'loops'
-              ? null
-              : rail(`link-${p}`, p === 'architect' ? advising : m.isRunning, p === 'architect' ? C.arch : C.main, w)
-          return (
-            <Box flexDirection="column">
-              {link}
-              {draw(p, w)}
-              {p === 'agents' ? expandedPanel(w) : null}
-            </Box>
-          )
-        })}
-      </Box>
-    )
-
-    // Desktop draws the agents' time axis as SVG under the panels.
-    const svgLanes =
-      e.surface !== 'terminal' && cards.length > 0
-        ? (() => {
-            const { Svg } = $.ui.resolve(e)
-            const rowH = 18
-            const pxW = 520
-            const geo = lanes(cards.slice(-10), now, 100)
-            const rects = cards
-              .slice(-10)
-              .map((c, i) => {
-                const gm = geo[i]
-                const x = 150 + ((gm?.before ?? 0) / 100) * (pxW - 160)
-                const wpx = Math.max(3, ((gm?.bar ?? 1) / 100) * (pxW - 160))
-                const fill = c.status === 'running' ? SVG_COLORS.running : c.status === 'done' ? SVG_COLORS.done : c.status === 'failed' ? SVG_COLORS.failed : SVG_COLORS.other
-                const label = shorten(cardTitle(c), 22).replace(/[<&>]/g, '')
-                return `<text x="4" y="${i * rowH + 13}" font-size="11" fill="${SVG_COLORS.label}">${label}</text><rect x="${x}" y="${i * rowH + 4}" width="${wpx}" height="10" rx="3" fill="${fill}"/>`
-              })
-              .join('')
-            const svgH = Math.min(10, cards.length) * rowH + 4
-            // No width or height on the element: it takes the markup's own width up to the pane's and
-            // scales down to fit a narrow one, rather than running past it at 520 pixels.
-            return (
-              <Svg
-                source={`<svg xmlns="http://www.w3.org/2000/svg" width="${pxW}" height="${svgH}" viewBox="0 0 ${pxW} ${svgH}">${rects}</svg>`}
-                alt={`${cards.length} agents on a time axis`}
-              />
-            )
-          })()
-        : null
-
-    // Inline above the prompt (the terminal's main screen), the pane is a summary of at most 8 rows.
-    const isMini = layout === 'mini' || (layout === 'auto' && e.props.placement === 'inline')
-    if (isMini) {
-      const live = [...cards.filter(c => c.status === 'running'), ...cards.filter(c => c.status !== 'running').reverse()].slice(0, 3)
-      const counts = `${s.rule} allowed · ${s.cleared} ${decider}${s.ask > 0 ? ` · ${s.ask} pending` : ''} · ${s.deny} denied`
-      const strip = g.recent.slice(-Math.max(4, marksIn(W - cfg.gateLabel.length - 2 - counts.length, isTerminal)))
-      const mg = ctxFill.pct !== null ? gauge(ctxFill.pct, 6) : null
-      return (
-        <Box flexDirection="column" width={W}>
-          {line(
-            [
-              {
-                spans: [
-                  { text: modelName, color: C.main, bold: true },
-                  { text: m.isRunning ? ' ● working' : ' ○ idle', color: m.isRunning ? C.main : C.dim },
-                ],
-              },
-              mg
-                ? {
-                    spans: [
-                      { text: '· ctx ', dim: true },
-                      { text: mg.on, color: (ctxFill.pct ?? 0) >= 80 ? C.warn : C.main },
-                      { text: mg.off, color: C.faint },
-                      { text: ` ${Math.round(ctxFill.pct ?? 0)}%` },
-                      ...(u.compactions > 0 ? [{ text: ` ${compactMark(u)}`, color: C.amber }] : []),
-                    ],
-                  }
-                : u.compactions > 0
-                  ? { spans: [{ text: compactMark(u), color: C.amber }] }
-                  : null,
-              u.costUsd !== null ? { spans: [{ text: `· ${fmtUsd(u.costUsd)}`, dim: true }] } : null,
-              showArchitect ? { spans: [{ text: `· ${cfg.architectLabel.toLowerCase()} ${advising ? 'advising' : a.consults.length}`, color: C.arch }] } : null,
-            ],
-            W,
-          )}
-          {strip.length > 0 ? (
-            <Box columnGap={1}>
-              <Text dimColor>{cfg.gateLabel.toLowerCase()}</Text>
-              {markRow(strip.map(checkMark))}
-              <Text color={s.deny > 0 ? C.warn : s.ask > 0 ? C.amber : C.dim} wrap="truncate">
-                {counts}
-              </Text>
-            </Box>
-          ) : null}
-          {live.map(c => (
-            <Box columnGap={1}>
-              <Text color={statusColor(c)}>{glyph(c)}</Text>
-              <Box width={Math.max(6, W - 30)} flexShrink={0}>
-                <Text wrap="truncate">{cardTitle(c)}</Text>
-              </Box>
-              {c.steps > 0 ? <Text dimColor>{`ctx ${kTokens(c.ctx)}`}</Text> : null}
-              {clock(`mini-clock-${c.id}`, c.spawnedAt, c.endedAt, C.dim)}
-            </Box>
-          ))}
-          {cards.length > live.length ? (
-            <Text color={C.faint} wrap="truncate">{`+${cards.length - live.length} more agents · /flightdeck layout compact for all`}</Text>
-          ) : null}
-          {lp.length > 0 ? <Text dimColor wrap="truncate">{`other loops ${lp.length} · ${lp.filter(l => isLoopActive(l, now)).length} active`}</Text> : null}
-          {!m.isRunning && r ? (
-            <Text dimColor wrap="truncate">
-              {`last turn ${fmtDuration(r.durationMs)} · ${plural(r.agents, 'agent')} · ${plural(r.edits, 'edit')} · ${plural(r.errors, 'error')}${r.costDelta !== null ? ` · +${fmtUsd(r.costDelta)}` : ''}`}
-            </Text>
-          ) : null}
-        </Box>
-      )
-    }
-
-    const legend = fitLegend(
-      [
-        { label: 'main', color: C.main },
-        { label: 'agents', color: C.agent },
-        { label: cfg.gateLabel.toLowerCase(), color: C.gate },
-        ...(showArchitect ? [{ label: cfg.architectLabel.toLowerCase(), color: C.arch }] : []),
-      ],
-      W,
-    )
-
-    const body = isWide ? (
-      <Box flexDirection="column">
-        <Box columnGap={2}>
-          {column(panels.filter(p => p === 'main' || p === 'architect' || p === 'gate'), colW)}
-          {column(panels.filter(p => p === 'agents' || p === 'loops' || p === 'receipt'), colW)}
-        </Box>
-        {panels.includes('log') ? logPanel(W) : null}
-      </Box>
-    ) : (
-      column(panels, W)
-    )
-
-    return (
-      <Box flexDirection="column" width={W}>
-        {/* Below 40 columns the frame's own title names the pane, so the header starts at the model. */}
-        {line(
-          [
-            W >= 40 ? { spans: [{ text: 'FLIGHTDECK', bold: true }, { text: ' ·', color: C.dim, bold: true }] } : null,
-            { spans: [{ text: modelName.toUpperCase(), color: C.main, bold: true }, { text: m.isRunning ? ' WORKS' : ' IDLE', bold: true }] },
-            showArchitect
-              ? {
-                  spans: [
-                    { text: '· ', color: C.dim, bold: true },
-                    { text: cfg.architectLabel, color: C.arch, bold: true },
-                    { text: advising ? ' ADVISING' : ' ON CALL', bold: true },
-                  ],
-                }
-              : null,
-          ],
-          W,
-          1,
-          'center',
-        )}
-        <Box key="legend" justifyContent="center" columnGap={2} marginBottom={legendGap}>
-          {legend.map(l => (
-            <Box flexShrink={0}>
-              <Text>
-                <Text color={l.color}>■</Text>
-                <Text dimColor>{` ${l.label}`}</Text>
-              </Text>
-            </Box>
-          ))}
-        </Box>
-        {body}
-        {svgLanes}
-      </Box>
-    )
+    const mono = await (monoRead ??= readMono($))
+    return drawDeck($, e, { cfg, faulted, mono, columns: e.props.bodyColumns, rows: paneRows(e), hotkey: key => key })
   }).catch(($, e, next) => {
     // Without this a failed draw leaves the engine's empty pane.
     const { Box, Text } = $.ui.resolve(e)
@@ -1406,5 +1466,45 @@ export const register: Register = (on, options) => {
         <Text color={C.warn} wrap="wrap">{`draw failed (${next.error.kind}): ${next.error.message ?? 'no message'}`}</Text>
       </Box>
     )
+  })
+
+  // ---------------------------------------------------------------- pane-grid cell
+  // pane-grid draws a grid of cells in one pane, `grid-<layout>`, and lists the mods whose hook runs there in
+  // its empty cells. When a cell holds the deck it is drawn there in the cell's size, and the own pane closes.
+  // Without pane-grid installed readPlacement is undefined: the hook hands on next(e) and nothing else changes.
+  // `plugin: 'pane-grid'`: from Claude Code 2.1.325 a matcher without `plugin` matches only panes this mod opened,
+  // and pane-grid opens every grid pane, so without it this hook is never called for a grid pane.
+  on('ui.render', { component: 'Pane', requestId: /^grid-/, plugin: 'pane-grid' }, async ($, e, next) => {
+    const placement = await readPlacement($, PLUGIN)
+    const below = await next(e)
+    const { Box, Button } = $.ui.resolve(e)
+    const offered = offerChoice(below, PLUGIN, placement, choice => <Button key={choice.key} plain label={choice.label} hotkey={choice.hotkey} onPress={() => {}} />)
+    if (!placement || placement.requestId !== e.requestId) return offered
+    const columns = placement.columns > 0 ? placement.columns : e.props.bodyColumns
+    const rows = placement.rows > 0 ? placement.rows : paneRows(e)
+    // A hotkey acts for the whole grid pane: taken only while this cell is the active one, and never
+    // one of pane-grid's toolbar letters (s and o of the gate rows), so the toolbar keeps them.
+    const toolbar: readonly string[] = TOOLBAR_KEYS
+    const hotkey = (key: string) => (placement.isActive && !toolbar.includes(key) ? key : undefined)
+    const mono = await (monoRead ??= readMono($))
+    const cell = (
+      <Box key={`cell:${PLUGIN}`} flexDirection="column">
+        {await drawDeck($, e, { cfg, faulted, mono, columns, rows, hotkey })}
+      </Box>
+    )
+    return fillSlot(offered, PLUGIN, cell) ?? (
+      <Box flexDirection="column">
+        {offered}
+        {cell}
+      </Box>
+    )
+  })
+
+  // The matcher's values are literals passed `as never`: pane-grid's state is not in this mod's contract.
+  on('state.set', { plugin: 'pane-grid' as never, key: 'layout' as never }, async ($, e, next) => {
+    const write = e as StateWrite
+    const result = await next(e)
+    await placeOwnPane($, cfg, write.value, write.previous)
+    return result
   })
 }
