@@ -1472,7 +1472,9 @@ export const register: Register = (on, options) => {
   // pane-grid draws a grid of cells in one pane, `grid-<layout>`, and lists the mods whose hook runs there in
   // its empty cells. When a cell holds the deck it is drawn there in the cell's size, and the own pane closes.
   // Without pane-grid installed readPlacement is undefined: the hook hands on next(e) and nothing else changes.
-  on('ui.render', { component: 'Pane', requestId: /^grid-/ }, async ($, e, next) => {
+  // `plugin: 'pane-grid'`: from Claude Code 2.1.325 a matcher without `plugin` matches only panes this mod opened,
+  // and pane-grid opens every grid pane, so without it this hook is never called for a grid pane.
+  on('ui.render', { component: 'Pane', requestId: /^grid-/, plugin: 'pane-grid' }, async ($, e, next) => {
     const placement = await readPlacement($, PLUGIN)
     const below = await next(e)
     const { Box, Button } = $.ui.resolve(e)
