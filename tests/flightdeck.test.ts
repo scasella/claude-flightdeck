@@ -66,6 +66,15 @@ test('redaction masks credentials before anything is stored', () => {
   expect(redact('ls -la src/')).toBe('ls -la src/')
 })
 
+test('redaction masks JSON-quoted keys and PEM private keys', () => {
+  expect(redact(`curl -d '{"password":"hunter2"}' x`)).not.toContain('hunter2')
+  expect(redact(`{"api_key": "abc123def456ghi", "n": 1}`)).not.toContain('abc123def456ghi')
+  expect(redact(`{'token':'s3cr3tvalue'}`)).not.toContain('s3cr3tvalue')
+  expect(redact(`{"api_key": "abc123def456ghi", "n": 1}`)).toContain('"n": 1')
+  const pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAsecret\n-----END RSA PRIVATE KEY-----'
+  expect(redact(`echo "${pem}" > k`)).not.toContain('MIIEowIBAAKCAQEAsecret')
+})
+
 test('redaction masks quoted flag values and common token shapes', () => {
   expect(redact('login --password "two words here" next')).not.toContain('words')
   expect(redact("login --token 'a b' next")).not.toContain(' b')
@@ -338,6 +347,19 @@ test('inline above the prompt, the pane is a summary of at most 8 rows', async (
     expect(await ui.find({ text: /session log/ })).toBeUndefined()
     await ui.unmount()
   }
+})
+
+test('session end blanks the web feed once the web view was opened', async ($, on) => {
+  engine(on)
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+  const writes: string[] = []
+  on('fs.write', (_$, e) => { writes.push(String((e as { content?: unknown }).content ?? JSON.stringify(e))); return { value: undefined } })
+  on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '' } }))
+  await $.session.end({ reason: 'resume', sessionId: 's' } as never)
+  expect(writes).toEqual([])
+  await $.command.run({ command: 'flightdeck', args: 'web' } as never)
+  await $.session.end({ reason: 'resume', sessionId: 's' } as never)
+  expect(writes.at(-1)).toContain('window.FD_STATE=null')
 })
 
 test('/clear starts the pane fresh', async ($, on) => {

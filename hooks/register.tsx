@@ -76,7 +76,7 @@ import {
   stepLoop,
 } from './core'
 import type { Config, Panel } from './core'
-import { toWeb, toWebScript } from './web'
+import { EMPTY_WEB_SCRIPT, toWeb, toWebScript } from './web'
 import type { WebInput } from './web'
 
 const PANE = 'flightdeck'
@@ -320,6 +320,10 @@ export const register: Register = (on, options) => {
   })
 
   on('session.end', async ($, e, next) => {
+    if (isWebOn) {
+      isWebOn = false
+      await $.fs.write(`${webDir($)}/state.js`, EMPTY_WEB_SCRIPT).catch(() => undefined)
+    }
     if (e.reason === 'clear') {
       await resetAll($)
       await refreshStatus($, cfg)

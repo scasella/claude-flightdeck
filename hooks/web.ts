@@ -119,6 +119,9 @@ export function toWeb({ m, u, g, cards, loops, lines, receipt, now }: WebInput) 
   }
 }
 
+/** Written when the session ends, so the feed's summaries do not outlive it on disk. The page ignores a null feed. */
+export const EMPTY_WEB_SCRIPT = 'window.FD_STATE=null;\n'
+
 /** The page loads this as a script, which works from file:// where fetch does not. `<` is escaped so no text closes the tag. */
 export const toWebScript = (state: ReturnType<typeof toWeb>) =>
   `window.FD_STATE=${JSON.stringify(state).replace(/</g, '\\u003c')};\n`

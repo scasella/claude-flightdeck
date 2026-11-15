@@ -111,7 +111,7 @@ Flightdeck only watches. Every hook passes its event on unchanged: it never deni
 | the context breakdown `/context` shows (its categories, memory-file paths, MCP tools, agents and skills), estimated locally once per model; it keeps only the compaction window from it | `$.session.usage({ breakdown: 'summary' })` |
 | advisor tool calls in the assistant's responses (their content is encrypted) | `session.append` |
 
-What it keeps: short summaries (a tool name plus a path or command, with credentials masked) in session state, which ends with the session. It makes **no** network requests, runs no processes, reads and writes no files, stores nothing across sessions, and calls no model. `claude plugin validate .` prints exactly what it hooks and calls.
+What it keeps: short summaries (a tool name plus a path or command, with credentials masked) in session state, which ends with the session. It makes **no** network requests and calls no model. Only the web view (`/flightdeck web` or `w`) touches files or processes: it writes `web/state.js` inside the plugin folder every 2 s, opens `web/index.html` in the default browser, and blanks the feed when the session ends. Without the web view it reads and writes no files and stores nothing across sessions. `claude plugin validate .` prints exactly what it hooks and calls.
 
 ## What is inferred, not measured
 
