@@ -76,13 +76,15 @@ import {
   stepLoop,
 } from './core'
 import type { Config, Panel } from './core'
-import { EMPTY_WEB_SCRIPT, toWeb, toWebScript } from './web'
+import { feedKey, toFeedScript, toFocusScript, toIndexScript, toWeb } from './web'
 import type { WebInput } from './web'
 
 const PANE = 'flightdeck'
 const TITLE = 'Flightdeck'
-/** How often, at most, an open browser view's feed is rewritten (the page polls every 2 s). */
+/** How often every session rewrites its web feed (the page polls every 2 s). */
 const WEB_EVERY_MS = 2000
+/** A feed not rewritten for this long belongs to a session that is gone; the index leaves it out. */
+const FEED_FRESH_MS = 15_000
 
 
 // ---------------------------------------------------------------- state
@@ -218,16 +220,49 @@ async function openPane($: EngineInterface, cfg: Config) {
 
 const webDir = ($: EngineInterface) => `${$.plugin.root.replace(/\\/g, '/')}/web`
 
-async function writeWeb($: EngineInterface, input: WebInput) {
-  await $.fs.write(`${webDir($)}/state.js`, toWebScript(toWeb(input)))
-}
+const feedPath = ($: EngineInterface, key: string) => `${webDir($)}/feeds/${key}.js`
 
-/** Writes the feed, then opens web/index.html in the default browser. Resolves the error text, or null. */
-async function openWeb($: EngineInterface): Promise<string | null> {
-  const [m, u, g, cards, lp, lines, r, now] = await Promise.all([
+async function webInput($: EngineInterface): Promise<WebInput> {
+  const [m, u, g, cards, loops, lines, r, now] = await Promise.all([
     getMain($), getUsage($), getGate($), getCards($), getLoops($), getLog($), read($, receipt), $.clock.now(),
   ])
-  await writeWeb($, { m, u, g, cards, loops: lp, lines, receipt: r, now })
+  return { m, u, g, cards, loops, lines, receipt: r, now }
+}
+
+/**
+ * Writes this session's feed, then the index of every session whose feed is fresh, so one page
+ * follows all of them. Each session derives the index from the folder, so concurrent writers agree.
+ * Resolves this session's feed key.
+ */
+async function writeWeb($: EngineInterface): Promise<string> {
+  const [input, id, cwd] = await Promise.all([webInput($), $.session.id(), $.session.cwd()])
+  const key = feedKey(id)
+  await $.fs.write(feedPath($, key), toFeedScript(key, { ...toWeb(input), session: { id, cwd } }))
+  const entries = await $.fs.list(`${webDir($)}/feeds`).catch(() => [])
+  const keys = entries
+    .filter(f => f.kind === 'file' && f.name.endsWith('.js') && input.now - f.mtimeMs < FEED_FRESH_MS)
+    .map(f => f.name.slice(0, -3))
+  await $.fs.write(`${webDir($)}/sessions.js`, toIndexScript(keys.includes(key) ? keys : [...keys, key]))
+  return key
+}
+
+// Every session keeps its web feed fresh, so one browser page follows them all without /flightdeck in each.
+// Started at session start, and again from a draw or command after a reload drops the timer.
+let feedTimer: { cancel: () => void } | null = null
+
+function startFeed($: EngineInterface) {
+  feedTimer ??= $.clock.every(WEB_EVERY_MS, () => void writeWeb($).catch(() => undefined))
+}
+
+function stopFeed() {
+  feedTimer?.cancel()
+  feedTimer = null
+}
+
+/** Writes the feed, points the page at this session, then opens web/index.html. Resolves the error text, or null. */
+async function openWeb($: EngineInterface): Promise<string | null> {
+  const key = await writeWeb($)
+  await $.fs.write(`${webDir($)}/focus.js`, toFocusScript(key))
   const page = `${webDir($)}/index.html`
   const isWindows = (await $.env.get('OS').catch(() => undefined)) === 'Windows_NT'
   const tries: string[][] = isWindows
@@ -280,9 +315,6 @@ export const register: Register = (on, options) => {
   const C = PALETTES[cfg.palette]
   // tool.check carries no loop id; the tool.call around it does, keyed by the call's id.
   const callLoop = new Map<string, string | null>()
-  // Set once the browser view is opened; the pane's draws then keep its feed fresh. A reload starts it over.
-  let isWebOn = false
-  let webAt = 0
 
   on('session.start', async ($, e, next) => {
     await $.command.register({
@@ -310,6 +342,7 @@ export const register: Register = (on, options) => {
       }))
     }
     if (cfg.openOnStart) void openPane($, cfg).catch(() => undefined)
+    startFeed($)
     await refreshStatus($, cfg)
     const done = await next(e)
     if (resumedWindow > 0) {
@@ -320,10 +353,11 @@ export const register: Register = (on, options) => {
   })
 
   on('session.end', async ($, e, next) => {
-    if (isWebOn) {
-      isWebOn = false
-      await $.fs.write(`${webDir($)}/state.js`, EMPTY_WEB_SCRIPT).catch(() => undefined)
-    }
+    // Blank the ended session's feed so its summaries do not outlive it; /clear and resume go on
+    // under a new id, which the running timer picks up. Any other end stops the timer.
+    if (e.reason !== 'clear' && e.reason !== 'resume') stopFeed()
+    const key = feedKey(e.sessionId)
+    await $.fs.write(feedPath($, key), toFeedScript(key, null)).catch(() => undefined)
     if (e.reason === 'clear') {
       await resetAll($)
       await refreshStatus($, cfg)
@@ -345,9 +379,9 @@ export const register: Register = (on, options) => {
       return { text: 'Flightdeck reset.' }
     }
     if (verb === 'web') {
+      startFeed($)
       const failed = await openWeb($)
-      isWebOn = true
-      return { text: failed ? `Flightdeck web: ${failed}.` : 'Flightdeck web view opened in the browser; it follows the pane every 2 s.' }
+      return { text: failed ? `Flightdeck web: ${failed}.` : 'Flightdeck web view opened; it follows every running session, pick one at the top.' }
     }
     if (verb === 'layout') {
       const layout: Layout | null = arg === 'compact' || arg === 'wide' || arg === 'auto' || arg === 'mini' ? arg : null
@@ -739,12 +773,8 @@ export const register: Register = (on, options) => {
       $.clock.now(),
       (monoRead ??= readMono($)),
     ])
-    if (isWebOn && now - webAt >= WEB_EVERY_MS) {
-      webAt = now
-      void writeWeb($, { m, u, g, cards, loops: lp, lines, receipt: r, now }).catch(() => undefined)
-    }
+    startFeed($)
     const pressWeb = async () => {
-      isWebOn = true
       const failed = await openWeb($).catch(() => 'could not write the feed')
       if (failed) await $.ui.toast(`Flightdeck web: ${failed}`)
     }

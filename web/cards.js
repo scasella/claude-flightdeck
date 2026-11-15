@@ -101,6 +101,6 @@ function tail(){
 var lastOk=0;
 function liveTag(){var t=span("live t");t.id="liveTag";paintLive(t);return t}
 function paintLive(t){t=t||document.getElementById("liveTag");if(!t)return;
-  if(location.protocol==="file:"){t.className="live faint";t.textContent="sample";return}
+  if(location.protocol==="file:"&&!lastOk){t.className="live faint";t.textContent="sample";return}
   var a=lastOk?Math.round((Date.now()-lastOk)/1000):-1;
   t.className="live "+(a<0||a>10?"c-warn":"c-gate");t.textContent=a<0?"no feed":a>10?"stale "+a+"s":"live"}

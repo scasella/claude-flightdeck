@@ -1,7 +1,7 @@
 import type { On, RenderElement } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Plugin, TestBody } from 'claude-code/testing'
-import { toWeb, toWebScript } from '../hooks/web'
+import { feedKey, toFeedScript, toFocusScript, toIndexScript, toWeb } from '../hooks/web'
 
 import {
   DEFAULT_ARCHITECT,
@@ -349,17 +349,24 @@ test('inline above the prompt, the pane is a summary of at most 8 rows', async (
   }
 })
 
-test('session end blanks the web feed once the web view was opened', async ($, on) => {
+test('session end blanks that session\'s web feed', async ($, on) => {
   engine(on)
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   const writes: string[] = []
-  on('fs.write', (_$, e) => { writes.push(String((e as { content?: unknown }).content ?? JSON.stringify(e))); return { value: undefined } })
-  on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '' } }))
-  await $.session.end({ reason: 'resume', sessionId: 's' } as never)
-  expect(writes).toEqual([])
-  await $.command.run({ command: 'flightdeck', args: 'web' } as never)
-  await $.session.end({ reason: 'resume', sessionId: 's' } as never)
-  expect(writes.at(-1)).toContain('window.FD_STATE=null')
+  on('fs.write', (_$, e) => { writes.push(JSON.stringify(e)); return { value: undefined } })
+  await $.session.end({ reason: 'resume', sessionId: 's-1' } as never)
+  expect(writes.at(-1)).toMatch(/feeds[\\/]+s-1\.js/)
+  expect(writes.at(-1)).toContain('=null;')
+})
+
+test('session feed scripts key by session, escape the tag and list fresh sessions', () => {
+  expect(feedKey('a/b:c')).toBe('a_b_c')
+  const w = toWeb({ m: { ...DEFAULT_MAIN, model: '</script>' }, u: DEFAULT_USAGE, g: DEFAULT_GATE, cards: [], loops: [], lines: [], receipt: null, now: 1 })
+  const s = toFeedScript('k1', { ...w, session: { id: 'k1', cwd: '/x' } })
+  expect(s.startsWith('(window.FD_FEEDS=window.FD_FEEDS||{})["k1"]=')).toBe(true)
+  expect(s).not.toContain('</script>')
+  expect(toIndexScript(['k1', 'k2'])).toBe('window.FD_INDEX={"keys":["k1","k2"]};\n')
+  expect(toFocusScript('k2')).toBe('window.FD_FOCUS="k2";\n')
 })
 
 test('/clear starts the pane fresh', async ($, on) => {
@@ -1505,7 +1512,6 @@ test('the web feed maps gate verdicts, masks secrets and escapes the script tag'
   expect(w.gate.strip).toBe('acd')
   expect(w.gate.rows.s.map(r => r.v)).toEqual(['allowed', 'classifier', 'denied'])
   expect(JSON.stringify(w)).not.toContain('sk-ant-abcdefghijklmnopqrstuvwxyz0123')
-  expect(toWebScript({ ...w, model: '</script>' })).not.toContain('</script>')
 })
 
 test('web agent bar fills against typical run time', () => {

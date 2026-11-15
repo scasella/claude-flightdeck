@@ -22,7 +22,7 @@ body{display:flex;flex-direction:column;box-sizing:border-box}
 .fill>*{flex:none}.fill>.wrap{flex:none}
 .topbar{display:flex;justify-content:flex-end;gap:1ch;max-width:1800px;width:100%;margin:0 auto}
 .topbar button{background:none;border:0;color:var(--dim);font:inherit;cursor:pointer;padding:0 .5ch}.topbar button:hover{color:var(--text)}#themeName{cursor:pointer;color:var(--dim);text-align:center}#themeFind{width:24ch;background:var(--bg);color:var(--text);border:1px solid var(--faint);font:inherit}
-.topbar label{color:var(--dim)}.tpick{position:relative}.tlist{position:absolute;right:0;top:1.6em;z-index:9;width:30ch;max-height:60vh;overflow:auto;background:var(--bg);border:1px solid var(--agent);padding:.2em 0}.tlist div{padding:0 1ch;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:var(--dim)}.tlist div.on{background:var(--agent);color:var(--bg)}.tlist div.cur{color:var(--text);font-weight:700}.tlist .none{cursor:default}
+.topbar label{color:var(--dim)}#sessionPick{max-width:48ch;margin-right:2ch;background:var(--bg);color:var(--text);border:1px solid var(--faint);font:inherit}.tpick{position:relative}.tlist{position:absolute;right:0;top:1.6em;z-index:9;width:30ch;max-height:60vh;overflow:auto;background:var(--bg);border:1px solid var(--agent);padding:.2em 0}.tlist div{padding:0 1ch;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:var(--dim)}.tlist div.on{background:var(--agent);color:var(--bg)}.tlist div.cur{color:var(--text);font-weight:700}.tlist .none{cursor:default}
 .mainband{}
 
 .meters{display:grid;gap:.2em 0}

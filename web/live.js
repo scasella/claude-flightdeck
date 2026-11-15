@@ -85,13 +85,58 @@ document.addEventListener("keydown",function(e){
 // The page polls the same file every 2s; only a changed feed restarts the running clocks.
 var lastFeed="";
 function takeFeed(d){lastOk=Date.now();var j=JSON.stringify(d);if(j===lastFeed)return;lastFeed=j;feedAt=Date.now();S=d;render()}
+// Every running session writes feeds/<key>.js; sessions.js lists the fresh ones and focus.js names the
+// session that last opened this page. The picker switches between them; the choice survives a reload.
+var FEEDS={},current=null,seenFocus=null;
+try{current=localStorage.getItem("fd.session")}catch(e){}
+function addScript(id,src,done){
+  var old=document.getElementById(id);if(old)old.remove();
+  var s=document.createElement("script");s.id=id;s.src=src+"?"+Date.now();
+  s.onload=s.onerror=function(){s.remove();done()};document.head.appendChild(s);
+}
+function sessionLabel(f){
+  var dir=(f.session&&f.session.cwd||"").replace(/[\\/]+$/,"").split(/[\\/]/).pop()||"session";
+  return dir+" - "+f.model+" - "+f.status;
+}
+function pickSession(key){
+  if(key===current)return;
+  current=key;try{localStorage.setItem("fd.session",key)}catch(e){}
+  lastFeed="";document.getElementById("pane").textContent="";
+  if(FEEDS[key])takeFeed(FEEDS[key]);
+  paintPicker();
+}
+function paintPicker(){
+  var sel=document.getElementById("sessionPick"),keys=Object.keys(FEEDS);
+  sel.hidden=document.getElementById("sessionLbl").hidden=!keys.length;
+  var want=keys.map(function(k){return k+"\u0000"+sessionLabel(FEEDS[k])}).join("\u0001");
+  if(sel.dataset.sig!==want){
+    sel.dataset.sig=want;sel.textContent="";
+    keys.forEach(function(k){var o=document.createElement("option");o.value=k;o.textContent=sessionLabel(FEEDS[k]);sel.appendChild(o)});
+  }
+  if(current!=null)sel.value=current;
+}
+function settle(){
+  var got=window.FD_FEEDS||{};window.FD_FEEDS={};FEEDS={};
+  for(var k in got)if(got[k])FEEDS[k]=got[k];
+  var keys=Object.keys(FEEDS);
+  if(!keys.length){paintPicker();return}
+  if(!FEEDS[current]){current=null;pickSession(keys[0]);return}
+  takeFeed(FEEDS[current]);paintPicker();
+}
 function load(){
-  // From disk the plugin's feed is state.js (fetch is blocked on file://): reload it as a script each poll.
+  // From disk the feeds are scripts (fetch is blocked on file://): reload them each poll.
   if(location.protocol==="file:"){
-    var old=document.getElementById("feed");if(old)old.remove();
-    var s=document.createElement("script");s.id="feed";s.src="state.js?"+Date.now();
-    s.onload=function(){if(window.FD_STATE){takeFeed(window.FD_STATE);window.FD_STATE=null}};
-    s.onerror=function(){};document.head.appendChild(s);return;
+    addScript("fd-focus","focus.js",function(){
+      var f=window.FD_FOCUS;
+      // A session that opens the page (or presses w) brings it to that session.
+      if(f&&f!==seenFocus){seenFocus=f;if(f!==current){current=f;lastFeed="";document.getElementById("pane").textContent=""}}
+      addScript("fd-index","sessions.js",function(){
+        var keys=(window.FD_INDEX&&window.FD_INDEX.keys)||[],left=keys.length;
+        if(!left)return settle();
+        keys.forEach(function(k){addScript("fd-feed-"+k,"feeds/"+encodeURIComponent(k)+".js",function(){if(--left===0)settle()})});
+      });
+    });
+    return;
   }
   fetch("state.json",{cache:"no-store"}).then(function(r){return r.ok?r.json():null}).then(function(d){if(d)takeFeed(d)}).catch(function(){});
 }

@@ -119,9 +119,23 @@ export function toWeb({ m, u, g, cards, loops, lines, receipt, now }: WebInput) 
   }
 }
 
-/** Written when the session ends, so the feed's summaries do not outlive it on disk. The page ignores a null feed. */
-export const EMPTY_WEB_SCRIPT = 'window.FD_STATE=null;\n'
+/** `<` is escaped so no text closes the script tag. */
+const asScript = (value: unknown) => JSON.stringify(value).replace(/</g, '\\u003c')
 
-/** The page loads this as a script, which works from file:// where fetch does not. `<` is escaped so no text closes the tag. */
-export const toWebScript = (state: ReturnType<typeof toWeb>) =>
-  `window.FD_STATE=${JSON.stringify(state).replace(/</g, '\\u003c')};\n`
+/** A session's feed file name (no extension), safe on every file system and as a DOM id. */
+export const feedKey = (sessionId: string) => sessionId.replace(/[^\w-]/g, '_')
+
+export type WebFeed = ReturnType<typeof toWeb> & { session: { id: string; cwd: string } }
+
+/**
+ * One session's feed, loaded by the page as a script (works from file://, where fetch does not).
+ * A null feed is written when the session ends, so its summaries do not outlive it; the page drops it.
+ */
+export const toFeedScript = (key: string, feed: WebFeed | null) =>
+  `(window.FD_FEEDS=window.FD_FEEDS||{})[${asScript(key)}]=${asScript(feed)};\n`
+
+/** The feeds written lately, so the page knows which files to load. */
+export const toIndexScript = (keys: string[]) => `window.FD_INDEX=${asScript({ keys })};\n`
+
+/** The session that last opened the web view; the page switches to it when it changes. */
+export const toFocusScript = (key: string) => `window.FD_FOCUS=${asScript(key)};\n`
