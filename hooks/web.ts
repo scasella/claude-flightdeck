@@ -2,8 +2,6 @@
 import type { AgentCard, Bucket, Gate, LogLine, Loop, Main, Receipt, Usage } from '../types'
 import { cardTitle, prettyModel, redact, shorten } from './core'
 
-/** Track cells the web timeline draws (TRACK in web/index.html). */
-const TRACK = 40
 const STRIP = 70
 const ROWS = 6
 const CARDS = 6
@@ -50,13 +48,28 @@ function gateOf(g: Gate) {
   }
 }
 
+/** Agents report no total, so a running bar measures elapsed time against how long finished ones took. */
+const GUESS_MS = 5 * 60_000
+const median = (xs: number[]) => {
+  const s = [...xs].sort((a, b) => a - b)
+  const mid = s.length >> 1
+  return s.length % 2 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2
+}
+function typicalMs(cards: AgentCard[]) {
+  const took = (cs: AgentCard[]) => cs.filter(c => c.endedAt != null).map(c => c.endedAt! - c.spawnedAt)
+  const all = took(cards)
+  return (type: string) => {
+    const same = took(cards.filter(c => c.type === type))
+    return same.length ? median(same) : all.length ? median(all) : GUESS_MS
+  }
+}
+
 function agentsOf(cards: AgentCard[], now: number) {
   const shown = cards.slice(-CARDS)
-  const start = Math.min(now, ...shown.map(c => c.spawnedAt))
-  const span = Math.max(1, now - start)
-  const cell = (ms: number) => Math.round((ms / span) * TRACK)
+  const typical = typicalMs(cards)
   return shown.map(c => {
     const end = c.endedAt ?? now
+    const ratio = c.endedAt != null ? 1 : (now - c.spawnedAt) / Math.max(1, typical(c.type))
     return {
       label: shorten(redact(cardTitle(c)), 60),
       type: c.type,
@@ -64,8 +77,8 @@ function agentsOf(cards: AgentCard[], now: number) {
       state: c.status === 'running' ? 'running' : c.status === 'completed' || c.status === 'done' ? 'done' : 'error',
       steps: c.steps,
       t: clock(end - c.spawnedAt),
-      b: cell(c.spawnedAt - start),
-      w: Math.max(1, cell(end - c.spawnedAt)),
+      fill: c.endedAt != null ? 1 : Math.min(0.95, Math.round(ratio * 100) / 100),
+      over: c.endedAt == null && ratio > 1,
       tools: c.tools.slice(-3).map(n => shorten(redact(`${n.tool} -> ${n.text}`), 80)),
       answer: shorten(redact(c.answer), 200),
     }

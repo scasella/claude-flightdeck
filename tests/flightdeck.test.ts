@@ -1485,3 +1485,12 @@ test('the web feed maps gate verdicts, masks secrets and escapes the script tag'
   expect(JSON.stringify(w)).not.toContain('sk-ant-abcdefghijklmnopqrstuvwxyz0123')
   expect(toWebScript({ ...w, model: '</script>' })).not.toContain('</script>')
 })
+
+test('web agent bar fills against typical run time', () => {
+  const card = (id: string, type: string, spawnedAt: number, endedAt: number | null) =>
+    ({ ...normalizeCard({ id, spawnedAt }), type, status: endedAt == null ? ('running' as const) : ('done' as const), endedAt })
+  const cards = [card('a', 'x', 0, 100_000), card('b', 'x', 0, 300_000), card('c', 'x', 400_000, null), card('d', 'y', 0, null)]
+  const w = toWeb({ m: DEFAULT_MAIN, u: DEFAULT_USAGE, g: DEFAULT_GATE, cards, loops: [], lines: [], receipt: null, now: 500_000 })
+  expect(w.agents.map(a => a.fill)).toEqual([1, 1, 0.5, 0.95])
+  expect(w.agents.map(a => a.over)).toEqual([false, false, false, true])
+})

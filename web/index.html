@@ -51,7 +51,7 @@ body{display:flex;flex-direction:column;box-sizing:border-box}
 .row .r{margin-left:auto}
 .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wrap{white-space:pre-wrap;word-break:break-all}
-.dim{color:var(--dim)}.faint{color:var(--faint)}.track{color:var(--track)}.live{margin-left:1ch}.sel{color:var(--agent)}.b{font-weight:700}
+.dim{color:var(--dim)}.faint{color:var(--faint)}.track{color:var(--track)}.pulse{animation:pulse 1.2s ease-in-out infinite}@keyframes pulse{50%{opacity:.45}}.live{margin-left:1ch}.sel{color:var(--agent)}.b{font-weight:700}
 .c-main{color:var(--main)}.c-agent{color:var(--agent)}.c-gate{color:var(--gate)}
 .c-cleared{color:var(--cleared)}.c-arch{color:var(--arch)}.c-amber{color:var(--amber)}.c-warn{color:var(--warn)}
 .sec{margin:.6em 0 .1em}
@@ -101,14 +101,14 @@ body{display:flex;flex-direction:column;box-sizing:border-box}
            "s":[{"v":"classifier","d":"git status"},{"v":"classifier","d":"claude plugin test ."}],
            "o":[{"v":"allowed","d":"mcp progress"}]}},
  "agents":[
-  {"label":"Audit verifier candidates","type":"cs-verdict-reviewer","model":"Sonnet 5.5","state":"done","steps":4,"t":"0:37","b":0,"w":4,
+  {"label":"Audit verifier candidates","type":"cs-verdict-reviewer","model":"Sonnet 5.5","state":"done","steps":4,"t":"0:37","fill":1,"over":false,
    "tools":["Bash -> cd D:/Work/personal-git-clones/claude-flightdeck","Bash -> grep -n redact hooks/core.ts","Read -> hooks/core.ts:200-260","Read -> hooks/register.tsx:600-660","Grep -> shorten( in hooks","Read -> tests/flightdeck.test.ts","Bash -> grep -n control tests/flightdeck.test.ts"],
    "answer":"{\"records\":[{\"fingerprint\":\"flightdeck:model-text-terminal-control-bytes\",\"verdict\":\"needs_validation\"}]}"},
-  {"label":"Flightdeck ctx warning option","type":"mod-fixer","model":"Opus 5.5","state":"done","steps":9,"t":"1:09","b":0,"w":9,"tools":["Edit -> hooks/register.tsx"],"answer":"contextWarning option added, 64 pass"},
-  {"label":"Flightdeck audit hardening fixes","type":"mod-fixer","model":"Opus 5.5","state":"done","steps":15,"t":"1:55","b":14,"w":13,"tools":["Edit -> hooks/core.ts"],"answer":"67 pass, 0 fail"},
-  {"label":"Flightdeck swarm web page sketch","type":"ui-sketch-builder","model":"Opus 5.5","state":"running","steps":6,"t":"0:57","b":12,"w":10,"tools":["Write -> index.html"],"answer":""},
-  {"label":"Agent board BRD suggestions","type":"claude","model":"Sonnet 5.5","state":"done","steps":6,"t":"0:36","b":16,"w":6,"tools":["Read -> README.md"],"answer":"15 suggestions"},
-  {"label":"Verify BRD gaps against code","type":"sweep-reviewer","model":"Sonnet 5.5","state":"error","steps":8,"t":"0:39","b":26,"w":6,"tools":["Grep -> board.py"],"answer":"stopped at 20 calls"}],
+  {"label":"Flightdeck ctx warning option","type":"mod-fixer","model":"Opus 5.5","state":"done","steps":9,"t":"1:09","fill":1,"over":false,"tools":["Edit -> hooks/register.tsx"],"answer":"contextWarning option added, 64 pass"},
+  {"label":"Flightdeck audit hardening fixes","type":"mod-fixer","model":"Opus 5.5","state":"done","steps":15,"t":"1:55","fill":1,"over":false,"tools":["Edit -> hooks/core.ts"],"answer":"67 pass, 0 fail"},
+  {"label":"Flightdeck swarm web page sketch","type":"ui-sketch-builder","model":"Opus 5.5","state":"running","steps":6,"t":"0:57","fill":0.62,"over":false,"tools":["Write -> index.html"],"answer":""},
+  {"label":"Agent board BRD suggestions","type":"claude","model":"Sonnet 5.5","state":"done","steps":6,"t":"0:36","fill":1,"over":false,"tools":["Read -> README.md"],"answer":"15 suggestions"},
+  {"label":"Verify BRD gaps against code","type":"sweep-reviewer","model":"Sonnet 5.5","state":"error","steps":8,"t":"0:39","fill":1,"over":false,"tools":["Grep -> board.py"],"answer":"stopped at 20 calls"}],
  "earlier":1,"loops":{"seen":6,"active":0},
  "lastTurn":{"secs":44,"agents":0,"edits":1,"cost":0.23},
  "log":[{"at":"11:53:51","src":"engine","msg":"agent message from a17b5516"},{"at":"11:54:09","src":"Flightdeck","msg":"Edit -> claude-flightdeck/HARDENING.md"}]}
@@ -121,6 +121,13 @@ function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=c
 function add(p){for(var i=1;i<arguments.length;i++){var c=arguments[i];if(c!=null)p.appendChild(typeof c==="string"?document.createTextNode(c):c)}return p}
 function span(cls,text){return el("span",cls,text)}
 function row(){var r=el("div","row");for(var i=0;i<arguments.length;i++)if(arguments[i])r.appendChild(arguments[i]);return r}
+// Agent bar: fill against the typical run time; past it the bar pulses instead of claiming more.
+// Widths are percentages so the bar scales with its column instead of being cut off.
+function agentBar(c,cls){
+  var pct=Math.max(3,Math.round(c.fill*100)),done=span(stColor[c.state]+(c.over?" pulse":""),"━".repeat(TRACK*2)),rest=span("track","·".repeat(TRACK*2));
+  done.style.cssText="flex:none;overflow:hidden;width:"+pct+"%";rest.style.cssText="flex:1;overflow:hidden";
+  var b=add(span(cls),done,rest);b.style.display="flex";return b;
+}
 function gauge(pct,n,cls){var f=Math.max(0,Math.min(n,Math.round(pct/100*n)));return add(span("bar"),span(cls,"\u2501".repeat(f)),span("faint","\u2501".repeat(n-f)))}
 function k(n){return n>=1000?Math.round(n/1000)+"k":String(n)}
 function box(color){return el("section","box "+color)}
@@ -172,9 +179,8 @@ function lanes(){
   if(!a.length){add(frag,el("div","faint","no subagents yet"));return frag}
   if(S.earlier)add(frag,el("div","faint","+"+S.earlier+" earlier"));
   a.forEach(function(c,i){
-    var before=Math.min(c.b,TRACK-1),bar=Math.max(1,Math.min(c.w,TRACK-before)),after=TRACK-before-bar;
     var r=add(el("div","row lane"),span(stColor[c.state]+(c.state==="running"?" spin":""),stMark[c.state]),add(span("t lbl "+(view.card===i?"b":"")),span(view.card===i?"sel b":"faint",view.card===i?"> ":"  "),(i+1)+": "+c.label),
-      add(span("r bar"),span("track","\u00b7".repeat(before)),span(stColor[c.state],"\u2501".repeat(bar)),span("track","\u00b7".repeat(after))),span("dim",c.t));
+      agentBar(c,"r bar"),span("dim",c.t));
     r.title=c.type+" · "+c.model+" · "+c.steps+" steps";r.tabIndex=0;r.onclick=function(){toggleCard(i)};frag.appendChild(r)});
   return frag;
 }
@@ -187,8 +193,7 @@ function focusCard(i){
   [["type",c.type],["model",c.model],["state",c.state],["steps",c.steps],["elapsed",c.t]].forEach(function(m){
     add(meta,add(span(),span("dim",m[0]+" "),span("b "+(m[0]==="state"?stColor[c.state]:""),m[1])))});
   add(b,meta);
-  var before=Math.min(c.b,TRACK-1),bar=Math.max(1,Math.min(c.w,TRACK-before));
-  add(b,add(el("div","ftrack bar"),span("track","·".repeat(before)),span(stColor[c.state],"━".repeat(bar)),span("track","·".repeat(Math.max(0,TRACK-before-bar)))));
+  add(b,agentBar(c,"ftrack bar"));
   var cols=el("div","fcols"),trail=el("div","ftrail"),tally=el("div","ftally");
   add(trail,el("div","faint sec","tool trail"));
   c.tools.forEach(function(t,j){var parts=t.split(" -> ");add(trail,row(span("faint",String(j+1).padStart(2," ")),span("c-agent b",parts[0]),span("t",parts.slice(1).join(" -> "))))});

@@ -60,14 +60,14 @@
    "state": "done",
    "steps": 4,
    "t": "0:37",
-   "b": 0,
-   "w": 4,
    "tools": [
     "Bash -> cd D:/Work/personal-git-clones/claude-flightdeck",
     "Bash -> grep -n redact hooks/core.ts",
     "Read -> tests/flightdeck.test.ts"
    ],
-   "answer": "{\"records\":[{\"fingerprint\":\"flightdeck:model-text-terminal-control-bytes\",\"verdict\":\"needs_validation\"}]}"
+   "answer": "{\"records\":[{\"fingerprint\":\"flightdeck:model-text-terminal-control-bytes\",\"verdict\":\"needs_validation\"}]}",
+   "fill": 1,
+   "over": false
   },
   {
    "label": "Flightdeck ctx warning option",
@@ -76,12 +76,12 @@
    "state": "done",
    "steps": 9,
    "t": "1:09",
-   "b": 0,
-   "w": 9,
    "tools": [
     "Edit -> hooks/register.tsx"
    ],
-   "answer": "contextWarning option added, 64 pass"
+   "answer": "contextWarning option added, 64 pass",
+   "fill": 1,
+   "over": false
   },
   {
    "label": "Flightdeck audit hardening fixes",
@@ -90,12 +90,12 @@
    "state": "done",
    "steps": 15,
    "t": "1:55",
-   "b": 14,
-   "w": 13,
    "tools": [
     "Edit -> hooks/core.ts"
    ],
-   "answer": "67 pass, 0 fail"
+   "answer": "67 pass, 0 fail",
+   "fill": 1,
+   "over": false
   },
   {
    "label": "Flightdeck swarm web page sketch",
@@ -104,12 +104,12 @@
    "state": "running",
    "steps": 6,
    "t": "0:57",
-   "b": 12,
-   "w": 10,
    "tools": [
     "Write -> index.html"
    ],
-   "answer": ""
+   "answer": "",
+   "fill": 0.62,
+   "over": false
   },
   {
    "label": "Agent board BRD suggestions",
@@ -118,12 +118,12 @@
    "state": "done",
    "steps": 6,
    "t": "0:36",
-   "b": 16,
-   "w": 6,
    "tools": [
     "Read -> README.md"
    ],
-   "answer": "15 suggestions"
+   "answer": "15 suggestions",
+   "fill": 1,
+   "over": false
   },
   {
    "label": "Verify BRD gaps against code",
@@ -132,12 +132,12 @@
    "state": "error",
    "steps": 8,
    "t": "0:39",
-   "b": 26,
-   "w": 6,
    "tools": [
     "Grep -> board.py"
    ],
-   "answer": "stopped at 20 calls"
+   "answer": "stopped at 20 calls",
+   "fill": 1,
+   "over": false
   }
  ],
  "earlier": 1,
