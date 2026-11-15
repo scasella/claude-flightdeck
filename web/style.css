@@ -1,0 +1,89 @@
+:root{
+  --bg:#0c0c0c; --text:#e8e8e8; --dim:#9a9a9a; --faint:#7a7a7a; --track:#585858;
+  --main:#d97757; --agent:#8f9cf7; --gate:#4eba65; --cleared:#b1b9f9;
+  --arch:#af87ff; --amber:#ffc107; --warn:#ff6b80;
+  --ch:1ch;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text)}
+body{font:18px/1.3 "Cascadia Mono","Cascadia Code",Consolas,monospace;font-variant-numeric:tabular-nums;padding:16px}
+::selection{background:var(--agent);color:var(--bg)}
+::-webkit-scrollbar{width:8px}::-webkit-scrollbar-thumb{background:var(--faint)}
+.pane{max-width:1800px;margin:0 auto}
+.grid{display:grid;grid-template-columns:minmax(36ch,1fr) minmax(48ch,2fr) minmax(36ch,1.3fr);gap:0 2ch;align-items:start}
+@media (max-width:1500px){.grid{grid-template-columns:minmax(36ch,1fr) minmax(0,2fr)}.col3{grid-column:1/-1}.grid:not(.flat){flex:none;grid-template-rows:auto auto}.grid:not(.flat) .col3 .log{min-height:12em}}
+@media (max-width:900px){.grid{grid-template-columns:1fr}.grid.flat{display:flex!important;flex-direction:column}.grid.flat>*{overflow:visible!important;min-height:auto}.fill{min-height:8em}.topbar{flex-wrap:wrap}}
+.col{min-width:0;display:flex;flex-direction:column;min-height:0}
+html,body{height:100%}
+body{display:flex;flex-direction:column;box-sizing:border-box}
+.pane{flex:1;display:flex;flex-direction:column;min-height:0;width:100%}
+.grid{flex:1;align-items:stretch;min-height:0}
+.fill{flex:1;min-height:12em;overflow:auto;display:flex;flex-direction:column}
+.fill>*{flex:none}.fill>.wrap{flex:none}
+.topbar{display:flex;justify-content:flex-end;gap:1ch;max-width:1800px;width:100%;margin:0 auto}
+.topbar button{background:none;border:0;color:var(--dim);font:inherit;cursor:pointer;padding:0 .5ch}.topbar button:hover{color:var(--text)}#themeName{cursor:pointer;color:var(--dim);text-align:center}#themeFind{width:24ch;background:var(--bg);color:var(--text);border:1px solid var(--faint);font:inherit}
+.topbar label{color:var(--dim)}.tpick{position:relative}.tlist{position:absolute;right:0;top:1.6em;z-index:9;width:30ch;max-height:60vh;overflow:auto;background:var(--bg);border:1px solid var(--agent);padding:.2em 0}.tlist div{padding:0 1ch;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:var(--dim)}.tlist div.on{background:var(--agent);color:var(--bg)}.tlist div.cur{color:var(--text);font-weight:700}.tlist .none{cursor:default}
+.mainband{}
+
+.meters{display:grid;gap:.2em 0}
+.meter .row{overflow:visible}.meter .gwrap{overflow:hidden;white-space:nowrap;font-size:1.1em}
+.facts{display:flex;flex-wrap:wrap;gap:0 2ch;margin-top:.2em}
+.bignum{}
+@media (max-width:900px){.meters{grid-template-columns:1fr}}
+.agents{line-height:1.4}
+.agents .lbl{flex-basis:40ch}
+.small{max-height:11em;overflow:auto;font-size:.9em;flex:none}
+.lbl{flex:0 0 44ch}
+/* Every lane's bar takes the same share, so rows line up and get the same segment count. */
+.lane .bar{flex:0 0 clamp(10ch,36%,32ch);overflow:hidden}.lane .lbl{flex:1;min-width:0}
+.log .row .r{margin-left:0;flex:1}
+.hd{text-align:center;margin-bottom:.4em}
+.hd b{font-weight:700}
+.box{border:1px solid currentColor;border-radius:6px;padding:.15em 1ch;margin:.6em 0}
+.box>*{color:var(--text)}
+.row{display:flex;gap:1ch;white-space:nowrap;overflow:hidden}
+.row.wraprow{flex-wrap:wrap;gap:0 2ch}
+.lanes{flex:none;max-height:60vh;overflow:auto}
+/* Agent bars: segmented blocks, filled in the state colour, empty ones as outlines. */
+.segs{letter-spacing:.08em;font-size:1.05em;justify-content:flex-end}.segs .track{color:var(--faint)}
+.row .r{margin-left:auto}
+.t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wrap{white-space:pre-wrap;word-break:break-all}
+.dim{color:var(--dim)}.faint{color:var(--faint)}.track{color:var(--track)}.pulse{animation:pulse 1.2s ease-in-out infinite}@keyframes pulse{50%{opacity:.45}}
+/* Theme switch: colours crossfade rather than snap. */
+body,body *{transition:color .2s ease-out,background-color .2s ease-out,border-color .2s ease-out}
+.live{margin-left:1ch}.sel{color:var(--agent)}.b{font-weight:700}
+.c-main{color:var(--main)}.c-agent{color:var(--agent)}.c-gate{color:var(--gate)}
+.c-cleared{color:var(--cleared)}.c-arch{color:var(--arch)}.c-amber{color:var(--amber)}.c-warn{color:var(--warn)}
+.sec{margin:.6em 0 .1em}
+.lane{cursor:pointer}.lane:hover .lbl{text-decoration:underline}
+.lane:focus-visible,.key:focus-visible{outline:1px solid var(--agent)}
+.bar{letter-spacing:0}
+.foot{margin-top:1em;text-align:center}
+
+/* Layout variants (?layout=2..10). Areas: main gate agents card loops log. */
+.grid.flat{display:grid;gap:.6em 2ch;align-items:stretch}
+.grid.flat>*{min-height:0;overflow:hidden}.grid.flat .box{margin:0}.grid.flat .fill{min-height:0;flex:1;overflow:auto}
+.a-main{grid-area:main}.a-gate{grid-area:gate}.a-agents{grid-area:agents}.a-card{grid-area:card}.a-loops{grid-area:loops}.a-log{grid-area:log}
+.a-agents>.agents{overflow:auto}
+[data-layout="2"] .flat{grid-template:"agents agents agents" 1.4fr "main gate log" 1fr "card card loops" auto/1fr 1fr 1.2fr}
+[data-layout="3"] .flat{grid-template:"main agents" auto "gate agents" 1fr "gate card" 1fr "gate log" 1fr "loops log" auto/40ch 1fr}
+[data-layout="4"] .flat{grid-template:"main main" auto "agents card" 1fr "log log" 1fr "gate loops" auto/1.6fr 1fr}
+[data-layout="5"] .flat{grid-template:"main agents" 1fr "gate card" 1fr "loops log" auto/1fr 1fr}
+[data-layout="5"] .flat>*{border:1px solid var(--faint);padding:.3em 1ch}
+[data-layout="6"] .pane{max-width:100ch}
+[data-layout="6"] .flat{grid-template:"main" auto "gate" auto "agents" auto "card" auto "loops" auto "log" 1fr/1fr}
+[data-layout="7"] .flat{grid-template:"agents log main" auto "agents log gate" 1fr "card log loops" auto/1fr 1.6fr 40ch}
+[data-layout="8"] body,[data-layout="8"]{font-size:15px}
+[data-layout="8"] .flat{grid-template:"main agents agents log" 1fr "gate card loops log" 1fr/1fr 1fr 1fr 1fr}
+[data-layout="9"] .flat{grid-template:"main main main" auto "agents agents gate" 1fr "card log log" 1fr "loops loops loops" auto/1fr 1fr 44ch}
+[data-layout="9"] .a-main .meters{grid-template-columns:repeat(3,1fr);gap:0 4ch}
+[data-layout="9"] .a-main .box{display:flex;flex-wrap:wrap;gap:0 4ch;align-items:center}
+[data-layout="10"] .flat{grid-template:"agents card" minmax(0,1fr) "loops card" auto "main gate" auto "main log" 8em/56ch 1fr}[data-layout="10"] .agents .lbl{flex-basis:32ch}
+.focus{font-size:1.1em;display:flex;flex-direction:column;gap:.35em}
+.focus .ftitle{font-size:1.2em}
+.fmeta{display:flex;flex-wrap:wrap;gap:0 3ch}
+.ftrack{overflow:hidden;white-space:nowrap;font-size:1.2em}
+.fcols{display:grid;grid-template-columns:minmax(0,1fr) 18ch;gap:0 3ch;min-height:0}
+.fanswer{border-left:1px solid var(--faint);padding-left:1ch;color:var(--text)}
+@media (max-width:900px){html,body{height:auto}.pane,.grid.flat{flex:none;height:auto}.grid.flat>*{flex:none;height:auto;min-height:0}.grid.flat .fill{flex:none;max-height:none;overflow:visible}.grid.flat .box{margin:0 0 .6em}}
