@@ -33,6 +33,7 @@ import {
   titleLines,
   consultTimeline,
   describeInput,
+  redact,
   endConsult,
   fitLegend,
   fmtClock,
@@ -339,19 +340,24 @@ export const register: Register = (on, options) => {
   on('turn.start', async ($, e, next) => {
     // A subagent's turn (its spawn, or a resume by SendMessage) is its card's, not the main turn's.
     if (e.agentId !== undefined) return next(e)
-    const [now, cost] = await Promise.all([$.clock.now(), costNow($)])
-    await update($, turn, () => ({ ...DEFAULT_TURN, startedAt: now, costAtStart: cost }))
-    await update($, main, m => ({ ...normalize(DEFAULT_MAIN, m), isRunning: true }))
-    // A background architect's report reaches the main loop as the text opening this turn. The
-    // SubagentHandback tool call (in tool.call) normally carries it first; this is the fallback.
-    const back = e.text ? handbackOf(e.text) : null
-    const a = back ? await getArchitect($) : null
-    if (back && a && a.ids.includes(back.from)) {
-      const advice = adviceLine(back.body)
-      if (advice && advice !== a.lastAdvice) await noteAdvice($, cfg, advice)
-    } else if (e.text) {
-      const p = promptLine(e.text)
-      await say($, p.who, p.text)
+    // Bookkeeping only: a fault here must never block or change the turn.
+    try {
+      const [now, cost] = await Promise.all([$.clock.now(), costNow($)])
+      await update($, turn, () => ({ ...DEFAULT_TURN, startedAt: now, costAtStart: cost }))
+      await update($, main, m => ({ ...normalize(DEFAULT_MAIN, m), isRunning: true }))
+      // A background architect's report reaches the main loop as the text opening this turn. The
+      // SubagentHandback tool call (in tool.call) normally carries it first; this is the fallback.
+      const back = e.text ? handbackOf(e.text) : null
+      const a = back ? await getArchitect($) : null
+      if (back && a && a.ids.includes(back.from)) {
+        const advice = adviceLine(back.body)
+        if (advice && advice !== a.lastAdvice) await noteAdvice($, cfg, advice)
+      } else if (e.text) {
+        const p = promptLine(e.text)
+        await say($, p.who, redact(p.text))
+      }
+    } catch {
+      // swallowed on purpose: the dashboard misses one line, the turn goes on
     }
     return next(e)
   })
@@ -475,22 +481,27 @@ export const register: Register = (on, options) => {
 
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e)
-    if (e.tool_use_id) {
-      const check: Check = {
-        id: e.tool_use_id,
-        tool: e.tool,
-        bucket: bucketOf(e.tool),
-        verdict: verdict.decision === 'allow' ? 'rule' : verdict.decision,
-        inSubagent: Boolean(callLoop.get(e.tool_use_id)),
-        detail: shorten(describeInput(e.tool, e.input), 90),
-        at: await $.clock.now(),
+    // Bookkeeping only: the verdict goes back unchanged even if recording it fails.
+    try {
+      if (e.tool_use_id) {
+        const check: Check = {
+          id: e.tool_use_id,
+          tool: e.tool,
+          bucket: bucketOf(e.tool),
+          verdict: verdict.decision === 'allow' ? 'rule' : verdict.decision,
+          inSubagent: Boolean(callLoop.get(e.tool_use_id)),
+          detail: shorten(describeInput(e.tool, e.input), 90),
+          at: await $.clock.now(),
+        }
+        await update($, gate, g => recordCheck(normalizeGate(g), check))
+        // The status line updates when the call settles; only a refusal ends here.
+        if (verdict.decision === 'deny') {
+          await say($, 'gate', `denied by rule · ${check.detail}`, 'error')
+          await refreshStatus($, cfg)
+        }
       }
-      await update($, gate, g => recordCheck(normalizeGate(g), check))
-      // The status line updates when the call settles; only a refusal ends here.
-      if (verdict.decision === 'deny') {
-        await say($, 'gate', `denied by rule · ${check.detail}`, 'error')
-        await refreshStatus($, cfg)
-      }
+    } catch {
+      // swallowed on purpose: a missed gate row never alters a permission decision
     }
     return verdict
   })
@@ -523,7 +534,8 @@ export const register: Register = (on, options) => {
     if (isEdit || hasFailed || (!e.agentId && t0.errorStreak > 0)) {
       await update($, turn, t => afterCall(normalize(DEFAULT_TURN, t), { inSubagent: Boolean(e.agentId), hasFailed, isEdit }))
     }
-    const text = shorten(describeInput(e.tool, e), 64)
+    // tool.call carries the input fields on the event itself (tests pass them flat); prefer .input when present.
+    const text = shorten(describeInput(e.tool, (e as { input?: unknown }).input ?? e), 64)
     if (e.agentId) {
       const id = e.agentId
       await update($, agents, list =>
@@ -586,7 +598,7 @@ export const register: Register = (on, options) => {
       id,
       type: e.name ?? e.subagentType,
       model: started.model,
-      description: e.description,
+      description: shorten(redact(e.description ?? ''), 120),
       spawnedAt: await $.clock.now(),
     }
     // Decided in the write: a resume whose first step already put its card back to running is not logged again.
@@ -632,7 +644,7 @@ export const register: Register = (on, options) => {
       await update($, agents, list =>
         listOf<unknown>(list)
           .map(normalizeCard)
-          .map(c => (c.id === id ? { ...c, status, endedAt: now, answer: shorten(e.answer, 400) } : c)),
+          .map(c => (c.id === id ? { ...c, status, endedAt: now, answer: shorten(redact(e.answer ?? ''), 400) } : c)),
       )
       // This run's own length: a resumed agent's card clock also spans the idle time between runs.
       const took = fmtDuration(e.durationMs)

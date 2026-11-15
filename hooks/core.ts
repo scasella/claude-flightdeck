@@ -361,9 +361,13 @@ export const limitLabel = (kind: string) =>
 const SECRETS: [RegExp, string][] = [
   [/(authorization\s*[:=]\s*)(bearer\s+|basic\s+)?\S+/gi, '$1$2•••'],
   [/\b(bearer)\s+[A-Za-z0-9._~+/-]{8,}=*/gi, '$1 •••'],
-  [/\b(sk|pk|rk|ghp|gho|ghs|github_pat|xox[abprs])[-_][A-Za-z0-9_-]{8,}/g, '•••'],
+  [/\b(sk|pk|rk|ghp|gho|ghs|ghu|ghr|github_pat|xox[abprs])[-_][A-Za-z0-9_-]{8,}/g, '•••'],
+  [/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, '•••'],
+  [/\bAIza[0-9A-Za-z_-]{35}/g, '•••'],
+  [/\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]+/g, '•••'],
+  [/\bATATT[A-Za-z0-9_=-]{10,}/g, '•••'],
   [/((?:api[_-]?key|access[_-]?token|token|secret|password|passwd|pwd)\s*[=:]\s*)("[^"]*"|'[^']*'|\S+)/gi, '$1•••'],
-  [/(--(?:token|password|api-key|secret)[= ])\S+/gi, '$1•••'],
+  [/(--(?:token|password|api-key|secret)[= ])("[^"]*"|'[^']*'|\S+)/gi, '$1•••'],
   [/(\b[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)=)\S+/g, '$1•••'],
   [/(\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:)[^\s@]+@/gi, '$1•••@'],
 ]

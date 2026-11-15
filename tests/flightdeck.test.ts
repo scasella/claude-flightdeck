@@ -62,7 +62,45 @@ test('redaction masks credentials before anything is stored', () => {
   expect(redact('psql postgres://bob:hunter2@db/x')).not.toContain('hunter2')
   expect(redact('password=hunter2 ls')).not.toContain('hunter2')
   expect(redact('ls -la src/')).toBe('ls -la src/')
+})
+
+test('redaction masks quoted flag values and common token shapes', () => {
+  expect(redact('login --password "two words here" next')).not.toContain('words')
+  expect(redact("login --token 'a b' next")).not.toContain(' b')
+  expect(redact('login --password "two words" next')).toContain('next')
+  expect(redact('id AKIAIOSFODNN7EXAMPLE x')).not.toContain('IOSFODNN7')
+  expect(redact('id ASIAIOSFODNN7EXAMPLE x')).not.toContain('IOSFODNN7')
+  expect(redact('url?k=AIzaSyA1234567890abcdefghijklmnopqrstuv')).not.toContain('1234567890')
+  expect(redact('t eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl x')).not.toContain('eyJzdWIi')
+  expect(redact('gh github_pat_11ABCDEFG0123456789_abcdefXYZ')).not.toContain('0123456789')
+  expect(redact('slack xoxb-1234-5678-abcdEFGH')).not.toContain('abcdEFGH')
+  expect(redact('jira ATATT3xFfGF0abcdefghijklmnop12345=AB12CD34')).not.toContain('abcdefghij')
+})
+
+test('describeInput keeps the last two path parts', () => {
   expect(describeInput('Read', { file_path: 'C:\\Users\\me\\proj\\src\\main.ts' })).toBe('Read → src/main.ts')
+})
+
+test('prompts, subagent descriptions and answers reach state redacted', async ($, on) => {
+  engine(on)
+  on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: 'z1' }))
+  await $.turn.start({ text: 'use AKIAIOSFODNN7EXAMPLE now', turnId: 'Z1' })
+  await $.agent.spawn(spawn('general-purpose', 'deploy with AKIAIOSFODNN7EXAMPLF'))
+  await $.turn.complete({ answer: 'key AKIAIOSFODNN7EXAMPLG done', durationMs: 10, isAborted: false, turnId: 'Z2', agentId: 'z1', reason: 'answer' })
+  const ui = await $.ui.mount({ ...pane(120), surface: 'terminal' })
+  expect(await ui.find({ text: /IOSFODNN7/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a bookkeeping fault never blocks a turn or changes a verdict', async ($, on) => {
+  on('ui.status', () => ({ value: undefined }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('tool.check', () => ({ decision: 'deny' }))
+  on('clock.now', () => {
+    throw new Error('boom')
+  })
+  expect(await $.turn.start({ text: 'go', turnId: 'F1' })).toEqual({ turnId: 'F1' })
+  expect(await $.tool.check({ tool: 'Bash', input: { command: 'ls' }, tool_use_id: 'f-k1' })).toEqual({ decision: 'deny' })
 })
 
 const check = (id: string, verdict: Check['verdict'], bucket: Check['bucket'] = 'shell'): Check => ({
