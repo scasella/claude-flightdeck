@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Flightdeck</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="flightdeck.css">
 </head>
 <body>
-<div class="topbar"><span class="dim">theme</span><button id="themePrev" aria-label="previous theme">&lt;</button><span id="themeName" class="b" title="click to search, t / T to cycle"></span><span class="tpick"><input id="themeFind" hidden aria-label="search themes" autocomplete="off" spellcheck="false"><div id="themeList" class="tlist" role="listbox" hidden></div></span><button id="themeNext" aria-label="next theme">&gt;</button></div>
+<div class="topbar" id="topbar"></div>
 <main class="pane" id="pane" aria-live="polite"></main>
 <script src="schemes.js"></script>
 <script id="sample" type="application/json">
@@ -31,17 +31,6 @@
  "lastTurn":{"secs":44,"agents":0,"edits":1,"cost":0.23},
  "log":[{"at":"11:53:51","src":"engine","msg":"agent message from a17b5516"},{"at":"11:54:09","src":"Flightdeck","msg":"Edit -> claude-flightdeck/HARDENING.md"}]}
 </script>
-<script src="base.js"></script>
-<script src="cards.js"></script>
-<script src="live.js"></script>
-<script src="theme.js"></script>
-<script>
-"use strict";
-var q=new URLSearchParams(location.search);
-if(q.get("state")==="empty"){S.agents=[];S.earlier=0}
-if(q.get("card"))view.card=+q.get("card")-1;
-render();load();setInterval(load,2000);setInterval(tickBars,1000);setInterval(function(){paintLive()},1000);
-setInterval(function(){spinI=(spinI+1)%SPIN.length;document.querySelectorAll(".spin").forEach(function(e){e.textContent=SPIN[spinI]})},120);
-</script>
+<script src="flightdeck.js"></script>
 </body>
 </html>

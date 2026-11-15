@@ -12,6 +12,8 @@ claude --plugin-dir .
 
 Edits to `hooks/` hot-reload in that session when Claude's turn ends.
 
+The browser page is built from `web-src/`: run `npm install` and `npm run build` there, and commit the rebuilt `web/index.html`, `web/flightdeck.js` and `web/flightdeck.css`.
+
 ## Before a pull request
 
 ```sh

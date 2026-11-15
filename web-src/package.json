@@ -1,0 +1,16 @@
+{
+  "name": "flightdeck-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@preact/signals": "2.11.4",
+    "htm": "3.1.1",
+    "preact": "11.2.0"
+  },
+  "devDependencies": {
+    "vite": "8.3.8"
+  }
+}

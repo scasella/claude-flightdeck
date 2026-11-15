@@ -5,6 +5,8 @@ import { cardTitle, prettyModel, redact, shorten } from './core'
 const STRIP = 70
 const ROWS = 6
 const CARDS = 6
+/** Tool calls kept per agent for the browser's detail card. */
+const TOOLS = 12
 
 const pctOf = (u: Usage, kind: RegExp) => u.limits.find(l => kind.test(l.kind))?.pct ?? 0
 
@@ -79,8 +81,12 @@ function agentsOf(cards: AgentCard[], now: number) {
       t: clock(end - c.spawnedAt),
       fill: c.endedAt != null ? 1 : Math.min(0.95, Math.round(ratio * 100) / 100),
       over: c.endedAt == null && ratio > 1,
-      tools: c.tools.slice(-3).map(n => shorten(redact(`${n.tool} -> ${n.text}`), 80)),
-      answer: shorten(redact(c.answer), 200),
+      tools: c.tools.slice(-TOOLS).map(n => shorten(redact(`${n.tool} -> ${n.text}`), 80)),
+      answer: shorten(redact(c.answer), 600),
+      task: shorten(redact(c.description), 160),
+      ctx: c.ctx,
+      out: c.out,
+      stop: c.lastStop ?? '',
     }
   })
 }

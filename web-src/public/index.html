@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flightdeck</title>
+<link rel="stylesheet" href="flightdeck.css">
+</head>
+<body>
+<div class="topbar" id="topbar"></div>
+<main class="pane" id="pane" aria-live="polite"></main>
+<script src="schemes.js"></script>
+<script id="sample" type="application/json">
+{"model":"Opus 5.5","status":"idle","effort":"low","mode":"auto","req":26,
+ "ctx":{"pct":46,"tokens":139000,"window":300000,"est":true},"cost":21.78,"fiveH":25,"sevenD":38,"ttft":5.4,
+ "gate":{"checks":82,"allowed":7,"classifier":75,"denied":0,"file":26,"shell":38,"other":18,
+   "strip":"ccccccccccaccccccccccccccccccccaccccccccccccccccccccccccccaacccccccccaa",
+   "rows":{"f":[{"v":"allowed","d":"Edit hooks/core.ts"},{"v":"classifier","d":"Write scratchpad/index.html"}],
+           "s":[{"v":"classifier","d":"git status"},{"v":"classifier","d":"claude plugin test ."}],
+           "o":[{"v":"allowed","d":"mcp progress"}]}},
+ "agents":[
+  {"label":"Audit verifier candidates","type":"cs-verdict-reviewer","model":"Sonnet 5.5","state":"done","steps":4,"t":"0:37","fill":1,"over":false,
+   "tools":["Bash -> cd D:/Work/personal-git-clones/claude-flightdeck","Bash -> grep -n redact hooks/core.ts","Read -> hooks/core.ts:200-260","Read -> hooks/register.tsx:600-660","Grep -> shorten( in hooks","Read -> tests/flightdeck.test.ts","Bash -> grep -n control tests/flightdeck.test.ts"],
+   "answer":"{\"records\":[{\"fingerprint\":\"flightdeck:model-text-terminal-control-bytes\",\"verdict\":\"needs_validation\"}]}"},
+  {"label":"Flightdeck ctx warning option","type":"mod-fixer","model":"Opus 5.5","state":"done","steps":9,"t":"1:09","fill":1,"over":false,"tools":["Edit -> hooks/register.tsx"],"answer":"contextWarning option added, 64 pass"},
+  {"label":"Flightdeck audit hardening fixes","type":"mod-fixer","model":"Opus 5.5","state":"done","steps":15,"t":"1:55","fill":1,"over":false,"tools":["Edit -> hooks/core.ts"],"answer":"67 pass, 0 fail"},
+  {"label":"Flightdeck swarm web page sketch","type":"ui-sketch-builder","model":"Opus 5.5","state":"running","steps":6,"t":"0:57","fill":0.62,"over":false,"tools":["Write -> index.html"],"answer":""},
+  {"label":"Agent board BRD suggestions","type":"claude","model":"Sonnet 5.5","state":"done","steps":6,"t":"0:36","fill":1,"over":false,"tools":["Read -> README.md"],"answer":"15 suggestions"},
+  {"label":"Verify BRD gaps against code","type":"sweep-reviewer","model":"Sonnet 5.5","state":"error","steps":8,"t":"0:39","fill":1,"over":false,"tools":["Grep -> board.py"],"answer":"stopped at 20 calls"}],
+ "earlier":1,"loops":{"seen":6,"active":0},
+ "lastTurn":{"secs":44,"agents":0,"edits":1,"cost":0.23},
+ "log":[{"at":"11:53:51","src":"engine","msg":"agent message from a17b5516"},{"at":"11:54:09","src":"Flightdeck","msg":"Edit -> claude-flightdeck/HARDENING.md"}]}
+</script>
+<script src="flightdeck.js"></script>
+</body>
+</html>

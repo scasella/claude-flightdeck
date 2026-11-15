@@ -6,3 +6,4 @@ web/state.js
 web/feeds/
 web/sessions.js
 web/focus.js
+web-src/node_modules/

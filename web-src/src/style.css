@@ -1,8 +1,10 @@
 :root{
-  --bg:#0c0c0c; --text:#e8e8e8; --dim:#9a9a9a; --faint:#7a7a7a; --track:#585858;
+  --bg:#0c0c0c; --text:#e8e8e8; --dim:#9a9a9a; --faint:#7a7a7a; --track:#646464;
   --main:#d97757; --agent:#8f9cf7; --gate:#4eba65; --cleared:#b1b9f9;
   --arch:#af87ff; --amber:#ffc107; --warn:#ff6b80;
   --ch:1ch;
+  /* Type scale: titles, body, meta. */
+  --fs-title:1.15em; --fs-body:1em; --fs-meta:.85em;
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--text)}
@@ -23,8 +25,9 @@ body{display:flex;flex-direction:column;box-sizing:border-box}
 .topbar{display:flex;justify-content:flex-end;gap:1ch;max-width:1800px;width:100%;margin:0 auto}
 .topbar button{background:none;border:0;color:var(--dim);font:inherit;cursor:pointer;padding:0 .5ch}.topbar button:hover{color:var(--text)}#themeName{cursor:pointer;color:var(--dim);text-align:center}#themeFind{width:24ch;background:var(--bg);color:var(--text);border:1px solid var(--faint);font:inherit}
 .topbar label{color:var(--dim)}.tpick{position:relative}.tlist{position:absolute;right:0;top:1.6em;z-index:9;width:30ch;max-height:60vh;overflow:auto;background:var(--bg);border:1px solid var(--agent);padding:.2em 0}.tlist div{padding:0 1ch;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:var(--dim)}.tlist div.on{background:var(--agent);color:var(--bg)}.tlist div.cur{color:var(--text);font-weight:700}.tlist .none{cursor:default}
-.top{display:flex;gap:2ch;align-items:flex-start}.top>.mainband{flex:0 0 auto;width:min(60ch,100%);margin:0 0 .4em}.top>.hd{flex:1}.sessions .srow{cursor:pointer;border-radius:4px}.sessions .srow:hover{background:color-mix(in srgb,var(--agent) 14%,transparent)}.sessions .lbl{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-@media (max-width:900px){.top{flex-direction:column-reverse}.top>.mainband{width:100%}}
+.top{display:grid;grid-template-columns:minmax(36ch,1fr) minmax(48ch,2fr) minmax(36ch,1.3fr);gap:0 2ch;align-items:start}.top>.mainband{margin:0;font-size:.9em}.top>.mainband .meters{grid-template-columns:repeat(3,1fr);gap:0 2ch}.top>.mainband .meter .row{gap:.5ch}.top>.mainband .meter .faint{display:none}.top>.mainband .bignum{font-size:1em}.top>.mainband .gwrap{font-size:.55em;line-height:1}.top>.mainband .facts{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.9em}.top>.hd{grid-column:2/-1;text-align:right;margin:0}.top{margin-bottom:.6em}.sessions .srow{cursor:pointer;border-radius:4px}.sessions .srow:hover{background:color-mix(in srgb,var(--agent) 14%,transparent)}.sessions .lbl{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:1500px){.top{grid-template-columns:minmax(36ch,1fr) minmax(0,2fr)}}
+@media (max-width:900px){.top{grid-template-columns:1fr}.top>.hd{grid-column:1;grid-row:1}.grid .sessions{min-height:0}}
 
 .meters{display:grid;gap:.2em 0}
 .meter .row{overflow:visible}.meter .gwrap{overflow:hidden;white-space:nowrap;font-size:1.1em}
@@ -46,7 +49,7 @@ body{display:flex;flex-direction:column;box-sizing:border-box}
 .row.wraprow{flex-wrap:wrap;gap:0 2ch}
 .lanes{flex:none;max-height:60vh;overflow:auto}
 /* Agent bars: segmented blocks, filled in the state colour, empty ones as outlines. */
-.segs{letter-spacing:.08em;font-size:1.05em;justify-content:flex-end}.segs .track{color:var(--faint)}
+.segs{letter-spacing:.08em;font-size:1.05em;justify-content:flex-end}.segs .track{color:var(--track)}
 .row .r{margin-left:auto}
 .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wrap{white-space:pre-wrap;word-break:break-all}
@@ -58,7 +61,7 @@ body,body *{transition:color .2s ease-out,background-color .2s ease-out,border-c
 .c-cleared{color:var(--cleared)}.c-arch{color:var(--arch)}.c-amber{color:var(--amber)}.c-warn{color:var(--warn)}
 .sec{margin:.6em 0 .1em}
 .lane{cursor:pointer}.lane:hover .lbl{text-decoration:underline}
-.lane:focus-visible,.key:focus-visible{outline:1px solid var(--agent)}
+.lane:focus-visible,.key:focus-visible,.srow:focus-visible,.more:focus-visible{outline:1px solid var(--agent)}
 .bar{letter-spacing:0}
 .foot{margin-top:1em;text-align:center}
 
@@ -82,9 +85,19 @@ body,body *{transition:color .2s ease-out,background-color .2s ease-out,border-c
 [data-layout="9"] .a-main .box{display:flex;flex-wrap:wrap;gap:0 4ch;align-items:center}
 [data-layout="10"] .flat{grid-template:"agents card" minmax(0,1fr) "loops card" auto "main gate" auto "main log" 8em/56ch 1fr}[data-layout="10"] .agents .lbl{flex-basis:32ch}
 .focus{font-size:1.1em;display:flex;flex-direction:column;gap:.35em}
-.focus .ftitle{font-size:1.2em}
+.focus .ftitle{font-size:var(--fs-title)}
 .fmeta{display:flex;flex-wrap:wrap;gap:0 3ch}
 .ftrack{overflow:hidden;white-space:nowrap;font-size:1.2em}
 .fcols{display:grid;grid-template-columns:minmax(0,1fr) 18ch;gap:0 3ch;min-height:0}
 .fanswer{border-left:1px solid var(--faint);padding-left:1ch;color:var(--text)}
 @media (max-width:900px){html,body{height:auto}.pane,.grid.flat{flex:none;height:auto}.grid.flat>*{flex:none;height:auto;min-height:0}.grid.flat .fill{flex:none;max-height:none;overflow:visible}.grid.flat .box{margin:0 0 .6em}}
+@media (max-width:600px){.lane .bar{flex-basis:7ch}.agents>.row:first-child{flex-wrap:wrap}}
+@media (max-width:600px){.gstrip{white-space:normal}.gstrip .bar{white-space:normal;word-break:break-all;overflow:visible}.grid{display:block}.top>.mainband .facts{white-space:normal}}
+.keysbtn{display:none;margin:1em auto 0}
+@media (hover:none),(max-width:600px){.foot{display:none}.keysbtn{display:block}}
+.ttl{font-size:var(--fs-title)}.meta,.faint.sec{font-size:var(--fs-meta)}
+/* A failed agent's lane is tinted so it stands out in a long list. */
+.lane[data-state="error"]{background:color-mix(in srgb,var(--warn) 12%,transparent);border-radius:4px}
+.more{background:none;border:1px solid var(--faint);border-radius:4px;color:var(--dim);font:inherit;font-size:var(--fs-meta);cursor:pointer;padding:0 .8ch}.more:hover{color:var(--text)}
+
+.keylist{position:fixed;right:16px;bottom:16px;z-index:20;background:var(--bg);min-width:34ch;max-width:calc(100vw - 32px);padding:.4em 1ch}.keylist .kk{flex:0 0 7ch}.keylist .row{white-space:normal}
