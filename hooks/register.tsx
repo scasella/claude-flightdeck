@@ -162,7 +162,7 @@ async function refreshStatus($: EngineInterface, cfg: Config) {
   const s = gateSummary(g)
   const ctxFill = contextFill(u)
   const parts = [
-    ctxFill.pct !== null ? `ctx ${Math.round(ctxFill.pct)}%` : null,
+    cfg.contextWarning && ctxFill.pct !== null ? `ctx ${Math.round(ctxFill.pct)}%` : null,
     cards.length > 0 ? `agents ${running}/${cards.length}` : null,
     a.consults.length > 0 || a.ids.length > 0 ? `${cfg.architectLabel.toLowerCase()} ${isAdvising(a) ? 'advising' : a.consults.length}` : null,
     s.deny > 0 ? `denied ${s.deny}` : null,
@@ -190,7 +190,7 @@ async function consultStarted($: EngineInterface, cfg: Config, id: string, via: 
 
 async function consultEnded($: EngineInterface, cfg: Config, advice: string | null, id?: string) {
   const at = await $.clock.now()
-  const first = advice?.split('\n').find(l => l.trim()) ?? null
+  const first = (advice === null ? null : redact(advice))?.split('\n').find(l => l.trim()) ?? null
   const text = first ? shorten(first.replace(/^[#>*\s-]+/, ''), 160) : null
   await update($, architect, a => endConsult(normalize(DEFAULT_ARCHITECT, a), at, text, id))
   await update($, turn, t => ({ ...normalize(DEFAULT_TURN, t), isReviewing: false }))
@@ -199,8 +199,8 @@ async function consultEnded($: EngineInterface, cfg: Config, advice: string | nu
 }
 
 async function noteAdvice($: EngineInterface, cfg: Config, advice: string) {
-  await update($, architect, x => ({ ...normalize(DEFAULT_ARCHITECT, x), lastAdvice: advice }))
-  await say($, cfg.architectLabel.toLowerCase(), `advice: ${shorten(advice, 60)}`, 'consult')
+  await update($, architect, x => ({ ...normalize(DEFAULT_ARCHITECT, x), lastAdvice: redact(advice) }))
+  await say($, cfg.architectLabel.toLowerCase(), `advice: ${shorten(redact(advice), 60)}`, 'consult')
 }
 
 async function isArchitectType($: EngineInterface, cfg: Config, type: string) {
@@ -351,7 +351,7 @@ export const register: Register = (on, options) => {
       const a = back ? await getArchitect($) : null
       if (back && a && a.ids.includes(back.from)) {
         const advice = adviceLine(back.body)
-        if (advice && advice !== a.lastAdvice) await noteAdvice($, cfg, advice)
+        if (advice && redact(advice) !== a.lastAdvice) await noteAdvice($, cfg, advice)
       } else if (e.text) {
         const p = promptLine(e.text)
         await say($, p.who, redact(p.text))
@@ -520,7 +520,7 @@ export const register: Register = (on, options) => {
       const a = e.agentId ? await getArchitect($) : null
       if (a && e.agentId && a.ids.includes(e.agentId) && typeof message === 'string') {
         const advice = adviceLine(message)
-        if (advice && advice !== a.lastAdvice) await noteAdvice($, cfg, advice)
+        if (advice && redact(advice) !== a.lastAdvice) await noteAdvice($, cfg, advice)
       }
       return ran
     }
@@ -598,7 +598,7 @@ export const register: Register = (on, options) => {
       id,
       type: e.name ?? e.subagentType,
       model: started.model,
-      description: shorten(redact(e.description ?? ''), 120),
+      description: shorten(redact((e.description ?? '').slice(0, 480)), 120),
       spawnedAt: await $.clock.now(),
     }
     // Decided in the write: a resume whose first step already put its card back to running is not logged again.
@@ -644,7 +644,7 @@ export const register: Register = (on, options) => {
       await update($, agents, list =>
         listOf<unknown>(list)
           .map(normalizeCard)
-          .map(c => (c.id === id ? { ...c, status, endedAt: now, answer: shorten(redact(e.answer ?? ''), 400) } : c)),
+          .map(c => (c.id === id ? { ...c, status, endedAt: now, answer: shorten(redact((e.answer ?? '').slice(0, 1600)), 400) } : c)),
       )
       // This run's own length: a resumed agent's card clock also spans the idle time between runs.
       const took = fmtDuration(e.durationMs)

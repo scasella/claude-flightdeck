@@ -696,6 +696,17 @@ test('the docked pane asks for the width set in paneColumns', { options: { paneC
   expect(asked).toEqual([46])
 })
 
+test('the status line leaves out the ctx percent unless contextWarning is on', async ($, on) => {
+  mock.clock(on)
+  let status: string | undefined = 'unset'
+  on('ui.status', (_$, e) => ((status = e.text), { value: undefined }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  compactHost(on, { window: () => 1_000_000, compact: 400_000 })
+  await $.session.measure({ context: { window: 1_000_000, tokens: 330_000, percent: 33 }, rateLimits: [], changed: ['context'] })
+  expect(parseConfig({}).contextWarning).toBe(false)
+  expect(status ?? '').not.toMatch(/ctx/)
+})
+
 test('the context gauge measures against a compaction window set below the model window', () => {
   const u = { ...DEFAULT_USAGE, tokens: 200_000, window: 1_000_000, compactWindow: 400_000 }
   // From the real reading, not the model's percentage: 200k of 400k.
@@ -738,7 +749,7 @@ const compactHost = (on: On, o: { window: () => number; compact: number | null; 
   return asked
 }
 
-test('the gauge, status and inline summary measure against the compaction window, read once per model window', async ($, on) => {
+test('the gauge, status and inline summary measure against the compaction window, read once per model window', { options: { contextWarning: true } }, async ($, on) => {
   mock.clock(on)
   let status: string | undefined
   on('ui.status', (_$, e) => {
@@ -1440,4 +1451,20 @@ test('with motion off, the still connector keeps the face from 2.1.299', { plugi
   const { named, lines, hasMono } = await facesAt($, on, kit => (kit ? '2.1.299' : '2.1.295'))
   expect(lines.length).toBe(2 * 2 * 3)
   expect(named.length).toBe(hasMono ? lines.length : 0)
+})
+
+import { adviceLine as adviceLineH, redact as redactH, shorten as shortenH } from '../hooks/core'
+
+test('shorten strips control bytes before collapsing', () => {
+  expect(shortenH('a\u001b[2Jb\u009bc', 20)).toBe('a[2Jbc')
+})
+
+test('redact stays fast on a long dotted input', () => {
+  const t0 = Date.now()
+  redactH('a.'.repeat(200000))
+  expect(Date.now() - t0).toBeLessThan(200)
+})
+
+test('architect advice line masks credentials', () => {
+  expect(adviceLineH('password=hunter2')).not.toContain('hunter2')
 })

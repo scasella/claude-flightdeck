@@ -1,6 +1,6 @@
 {
   "name": "flightdeck",
-  "version": "0.6.1-hardened.1",
+  "version": "0.6.1-hardened.2",
   "description": "Flightdeck: a live agent dashboard for Claude Code. Main model vitals, an on-call architect, every permission check, subagent cards and swimlanes, a turn receipt and a session log, all from real session events",
   "author": {
     "name": "Stephen Casella",
@@ -112,6 +112,12 @@
       "description": "Show context, agents, consults and denials in the status line",
       "type": "boolean",
       "default": true
+    },
+    "contextWarning": {
+      "title": "Context in status line",
+      "description": "Show the context fill percent in the status line (off by default; the host status line already shows it)",
+      "type": "boolean",
+      "default": false
     }
   }
 }

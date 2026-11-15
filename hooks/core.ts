@@ -114,6 +114,7 @@ export type Config = {
   palette: Palette
   openOnStart: boolean
   statusLine: boolean
+  contextWarning: boolean
 }
 
 const safeRegExp = (source: string, fallback: string) => {
@@ -150,6 +151,7 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
     palette: str('palette', 'theme') === 'pastel' ? 'pastel' : 'theme',
     openOnStart: bool('openOnStart', true),
     statusLine: bool('statusLine', true),
+    contextWarning: bool('contextWarning', false),
   }
 }
 
@@ -212,7 +214,7 @@ export const prettyModel = (id: string) => {
 }
 
 export const shorten = (s: string, n: number) => {
-  const one = s.replace(/\s+/g, ' ').trim()
+  const one = s.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ').trim()
   return n <= 0 ? '' : one.length > n ? `${one.slice(0, Math.max(0, n - 1)).trimEnd()}…` : one
 }
 
@@ -369,7 +371,7 @@ const SECRETS: [RegExp, string][] = [
   [/((?:api[_-]?key|access[_-]?token|token|secret|password|passwd|pwd)\s*[=:]\s*)("[^"]*"|'[^']*'|\S+)/gi, '$1•••'],
   [/(--(?:token|password|api-key|secret)[= ])("[^"]*"|'[^']*'|\S+)/gi, '$1•••'],
   [/(\b[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)=)\S+/g, '$1•••'],
-  [/(\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:)[^\s@]+@/gi, '$1•••@'],
+  [/(\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s/:@]+:)[^\s@]+@/gi, '$1•••@'],
 ]
 
 /** What the gate drill-down may store: credentials masked before anything is written to state. */
@@ -660,7 +662,7 @@ export const handbackOf = (text: string): { from: string; body: string } | null 
 /** The advice line a pane shows for a report: its first real line, markdown markers stripped, cut to 160. */
 export const adviceLine = (report: string) => {
   const first = report.split('\n').map(l => l.trim()).find(l => l && !l.startsWith('[') && !l.startsWith('<')) ?? ''
-  return shorten(first.replace(/\*\*|__/g, '').replace(/^[#>*\s-]+/, ''), 160)
+  return shorten(redact(first).replace(/\*\*|__/g, '').replace(/^[#>*\s-]+/, ''), 160)
 }
 
 export const elapsedOf = (c: AgentCard, now: number) => (c.endedAt ?? now) - c.spawnedAt
