@@ -40,7 +40,7 @@ export function GateCard({ S }) {
   const g = S.gate, open = view.value.gate, [expanded, setExpanded] = useState(false);
   const folded = narrow.value && !expanded;
   const strip = [...g.strip].map((ch) => html`<span class=${ch === "a" ? "c-gate" : ch === "d" ? "c-warn" : "c-cleared"}>${"■"}</span>`);
-  return html`<section class=${"box c-gate gate" + (folded ? "" : " fill")}>
+  return html`<section class="box c-gate gate">
     <div class="row"><span class="c-gate b ttl">GATE · permissions</span><span class="r dim meta">${g.checks} checks</span></div>
     <${GateTally} g=${g}/>
     ${narrow.value ? html`<div><button class="more" aria-expanded=${expanded} onClick=${() => setExpanded(!expanded)}>${expanded ? "hide checks" : "show checks"}</button></div>` : null}
@@ -67,7 +67,7 @@ function SessionRow({ id, f }) {
 // Every live session as a row; click one to follow it.
 export function SessionsCard() {
   const all = sessions.value, keys = Object.keys(all);
-  return html`<section class="box c-agent sessions">
+  return html`<section class="box c-agent sessions fill">
     <div class="row"><span class="c-agent b ttl">sessions</span><span class="dim t meta">${" · " + keys.length + " live"}</span></div>
     ${keys.length ? null : html`<div class="faint">no live sessions yet</div>`}
     ${keys.map((id) => html`<${SessionRow} key=${id} id=${id} f=${all[id]}/>`)}
