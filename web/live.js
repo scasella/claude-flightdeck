@@ -47,10 +47,25 @@ function syncAttrs(o,n){
 }
 // cloneNode drops handler properties, so carry them across by walking both trees together.
 function copyHandlers(c,n){if(n.nodeType!==1)return;c.onclick=n.onclick;for(var i=0;i<n.childNodes.length;i++)copyHandlers(c.childNodes[i],n.childNodes[i])}
+// Every live session as a row; click one (or press its number with shift) to follow it.
+function sessionsCard(){
+  var b=box("c-agent sessions"),keys=Object.keys(FEEDS);
+  add(b,row(span("c-agent b","sessions"),span("dim t"," · "+keys.length+" live")));
+  if(!keys.length)add(b,el("div","faint","no live sessions yet"));
+  keys.forEach(function(k){
+    var f=FEEDS[k],on=k===current,r=row(span(on?"c-agent b":"faint",on?"> ":"  "),span(on?"b lbl":"lbl",sessionDir(f)),
+      span("dim t"," "+f.model+" "),span(f.status==="idle"?"dim":"c-main",f.status==="idle"?"○":"●"));
+    r.classList.add("srow");r.dataset.key="s-"+k;r.title=f.session&&f.session.cwd||"";
+    r.onclick=function(){pickSession(k)};add(b,r);
+  });
+  return b;
+}
 function renderPane(p){
   p.textContent="";
-  add(p,add(el("div","hd"),add(el("div"),span("b","FLIGHTDECK \u00b7 "),span("c-main b",S.model.toUpperCase()),span("b"," "+S.status.toUpperCase()),liveTag()),
-    add(el("div"),span("c-main","\u25a0"),span("dim"," main  "),span("c-agent","\u25a0"),span("dim"," agents  "),span("c-gate","\u25a0"),span("dim"," gate"))));
+  var top=el("div","top");
+  add(top,mainCard());
+  add(p,add(top,add(el("div","hd"),add(el("div"),span("b","FLIGHTDECK \u00b7 "),span("c-main b",S.model.toUpperCase()),span("b"," "+S.status.toUpperCase()),liveTag()),
+    add(el("div"),span("c-main","\u25a0"),span("dim"," main  "),span("c-agent","\u25a0"),span("dim"," agents  "),span("c-gate","\u25a0"),span("dim"," gate")))));
   var foot=el("div","foot faint","1-6 expand \u00b7 f/s/o gate rows \u00b7 t theme \u00b7 esc back");
   var ex=expanded()||preview()||add(el("div","box faint"),"press 1-6 to open an agent");
   var ag=add(el("section","box c-agent agents fill"),lanes());
@@ -61,11 +76,11 @@ function renderPane(p){
     var log=el("div","a-log col");log.appendChild(tl.firstChild);log.firstChild.classList.add("fill");
     function area(n,node){var w=el("div","a-"+n+" col");w.appendChild(node);return w}
     ex.classList.add("fill");
-    add(fg,area("main",mainCard()),area("gate",gateCard()),area("agents",ag),area("card",ex),loops,log);
+    add(fg,area("main",sessionsCard()),area("gate",gateCard()),area("agents",ag),area("card",ex),loops,log);
     add(p,fg,foot);return;
   }
   var g=el("div","grid"),c1=el("div","col"),c2=el("div","col"),c3=el("div","col col3");
-  add(c1,mainCard());
+  add(c1,sessionsCard());
   add(c1,gateCard());
   // The list sizes to its rows; the detail below takes the rest of the column.
   ag.classList.remove("fill");ag.classList.add("lanes");ex.classList.add("fill");
@@ -94,34 +109,26 @@ function addScript(id,src,done){
   var s=document.createElement("script");s.id=id;s.src=src+"?"+Date.now();
   s.onload=s.onerror=function(){s.remove();done()};document.head.appendChild(s);
 }
-function sessionLabel(f){
-  var dir=(f.session&&f.session.cwd||"").replace(/[\\/]+$/,"").split(/[\\/]/).pop()||"session";
-  return dir+" - "+f.model+" - "+f.status;
+function sessionDir(f){
+  return (f.session&&f.session.cwd||"").replace(/[\\/]+$/,"").split(/[\\/]/).pop()||"session";
 }
 function pickSession(key){
   if(key===current)return;
   current=key;try{localStorage.setItem("fd.session",key)}catch(e){}
   lastFeed="";document.getElementById("pane").textContent="";
   if(FEEDS[key])takeFeed(FEEDS[key]);
-  paintPicker();
 }
-function paintPicker(){
-  var sel=document.getElementById("sessionPick"),keys=Object.keys(FEEDS);
-  sel.hidden=document.getElementById("sessionLbl").hidden=!keys.length;
-  var want=keys.map(function(k){return k+"\u0000"+sessionLabel(FEEDS[k])}).join("\u0001");
-  if(sel.dataset.sig!==want){
-    sel.dataset.sig=want;sel.textContent="";
-    keys.forEach(function(k){var o=document.createElement("option");o.value=k;o.textContent=sessionLabel(FEEDS[k]);sel.appendChild(o)});
-  }
-  if(current!=null)sel.value=current;
-}
+// A change in another session (one ended, one went idle) redraws the list even when this feed is unchanged.
+var lastList="";
 function settle(){
   var got=window.FD_FEEDS||{};window.FD_FEEDS={};FEEDS={};
   for(var k in got)if(got[k])FEEDS[k]=got[k];
   var keys=Object.keys(FEEDS);
-  if(!keys.length){paintPicker();return}
+  var list=keys.map(function(k){return k+" "+FEEDS[k].model+" "+FEEDS[k].status+" "+sessionDir(FEEDS[k])}).join("|");
+  if(list!==lastList){lastList=list;lastFeed=""}
+  if(!keys.length){if(!lastFeed){lastFeed="-";render()}return}
   if(!FEEDS[current]){current=null;pickSession(keys[0]);return}
-  takeFeed(FEEDS[current]);paintPicker();
+  takeFeed(FEEDS[current]);
 }
 function load(){
   // From disk the feeds are scripts (fetch is blocked on file://): reload them each poll.

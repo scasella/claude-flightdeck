@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="topbar"><label for="sessionPick" id="sessionLbl" hidden>session</label><select id="sessionPick" hidden aria-label="session to follow" onchange="pickSession(this.value)"></select><span class="dim">theme</span><button id="themePrev" aria-label="previous theme">&lt;</button><span id="themeName" class="b" title="click to search, t / T to cycle"></span><span class="tpick"><input id="themeFind" hidden aria-label="search themes" autocomplete="off" spellcheck="false"><div id="themeList" class="tlist" role="listbox" hidden></div></span><button id="themeNext" aria-label="next theme">&gt;</button></div>
+<div class="topbar"><span class="dim">theme</span><button id="themePrev" aria-label="previous theme">&lt;</button><span id="themeName" class="b" title="click to search, t / T to cycle"></span><span class="tpick"><input id="themeFind" hidden aria-label="search themes" autocomplete="off" spellcheck="false"><div id="themeList" class="tlist" role="listbox" hidden></div></span><button id="themeNext" aria-label="next theme">&gt;</button></div>
 <main class="pane" id="pane" aria-live="polite"></main>
 <script src="schemes.js"></script>
 <script id="sample" type="application/json">

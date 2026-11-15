@@ -22,8 +22,9 @@ body{display:flex;flex-direction:column;box-sizing:border-box}
 .fill>*{flex:none}.fill>.wrap{flex:none}
 .topbar{display:flex;justify-content:flex-end;gap:1ch;max-width:1800px;width:100%;margin:0 auto}
 .topbar button{background:none;border:0;color:var(--dim);font:inherit;cursor:pointer;padding:0 .5ch}.topbar button:hover{color:var(--text)}#themeName{cursor:pointer;color:var(--dim);text-align:center}#themeFind{width:24ch;background:var(--bg);color:var(--text);border:1px solid var(--faint);font:inherit}
-.topbar label{color:var(--dim)}#sessionPick{max-width:48ch;margin-right:2ch;background:var(--bg);color:var(--text);border:1px solid var(--faint);font:inherit}.tpick{position:relative}.tlist{position:absolute;right:0;top:1.6em;z-index:9;width:30ch;max-height:60vh;overflow:auto;background:var(--bg);border:1px solid var(--agent);padding:.2em 0}.tlist div{padding:0 1ch;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:var(--dim)}.tlist div.on{background:var(--agent);color:var(--bg)}.tlist div.cur{color:var(--text);font-weight:700}.tlist .none{cursor:default}
-.mainband{}
+.topbar label{color:var(--dim)}.tpick{position:relative}.tlist{position:absolute;right:0;top:1.6em;z-index:9;width:30ch;max-height:60vh;overflow:auto;background:var(--bg);border:1px solid var(--agent);padding:.2em 0}.tlist div{padding:0 1ch;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:var(--dim)}.tlist div.on{background:var(--agent);color:var(--bg)}.tlist div.cur{color:var(--text);font-weight:700}.tlist .none{cursor:default}
+.top{display:flex;gap:2ch;align-items:flex-start}.top>.mainband{flex:0 0 auto;width:min(60ch,100%);margin:0 0 .4em}.top>.hd{flex:1}.sessions .srow{cursor:pointer;border-radius:4px}.sessions .srow:hover{background:color-mix(in srgb,var(--agent) 14%,transparent)}.sessions .lbl{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:900px){.top{flex-direction:column-reverse}.top>.mainband{width:100%}}
 
 .meters{display:grid;gap:.2em 0}
 .meter .row{overflow:visible}.meter .gwrap{overflow:hidden;white-space:nowrap;font-size:1.1em}
