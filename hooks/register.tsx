@@ -76,9 +76,13 @@ import {
   stepLoop,
 } from './core'
 import type { Config, Panel } from './core'
+import { toWeb, toWebScript } from './web'
+import type { WebInput } from './web'
 
 const PANE = 'flightdeck'
 const TITLE = 'Flightdeck'
+/** How often, at most, an open browser view's feed is rewritten (the page polls every 2 s). */
+const WEB_EVERY_MS = 2000
 
 
 // ---------------------------------------------------------------- state
@@ -212,6 +216,30 @@ async function openPane($: EngineInterface, cfg: Config) {
   return $.ui.open({ id: PANE, title: TITLE, columns: cfg.paneColumns, rows: 8 })
 }
 
+const webDir = ($: EngineInterface) => `${$.plugin.root.replace(/\\/g, '/')}/web`
+
+async function writeWeb($: EngineInterface, input: WebInput) {
+  await $.fs.write(`${webDir($)}/state.js`, toWebScript(toWeb(input)))
+}
+
+/** Writes the feed, then opens web/index.html in the default browser. Resolves the error text, or null. */
+async function openWeb($: EngineInterface): Promise<string | null> {
+  const [m, u, g, cards, lp, lines, r, now] = await Promise.all([
+    getMain($), getUsage($), getGate($), getCards($), getLoops($), getLog($), read($, receipt), $.clock.now(),
+  ])
+  await writeWeb($, { m, u, g, cards, loops: lp, lines, receipt: r, now })
+  const page = `${webDir($)}/index.html`
+  const isWindows = (await $.env.get('OS').catch(() => undefined)) === 'Windows_NT'
+  const tries: string[][] = isWindows
+    ? [['rundll32', 'url.dll,FileProtocolHandler', page]]
+    : [['open', page], ['xdg-open', page]]
+  for (const argv of tries) {
+    const ran = await $.process.run(argv, { timeoutMs: 10_000 }).catch(() => null)
+    if (ran && ran.exitCode === 0) return null
+  }
+  return `could not open a browser; open ${page} by hand`
+}
+
 async function resetAll($: EngineInterface) {
   await update($, main, m => ({ ...DEFAULT_MAIN, model: normalize(DEFAULT_MAIN, m).model, mode: normalize(DEFAULT_MAIN, m).mode }))
   await update($, architect, () => DEFAULT_ARCHITECT)
@@ -252,12 +280,15 @@ export const register: Register = (on, options) => {
   const C = PALETTES[cfg.palette]
   // tool.check carries no loop id; the tool.call around it does, keyed by the call's id.
   const callLoop = new Map<string, string | null>()
+  // Set once the browser view is opened; the pane's draws then keep its feed fresh. A reload starts it over.
+  let isWebOn = false
+  let webAt = 0
 
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'flightdeck',
       description: 'Flightdeck, the live agent dashboard: open, close, reset, or set the layout',
-      argumentHint: '[open|close|reset|layout auto|compact|wide|mini]',
+      argumentHint: '[open|close|reset|web|layout auto|compact|wide|mini]',
     })
     await migrate($)
     // A host without usage (headless, an SDK host, a session not yet bound) just starts without it.
@@ -309,6 +340,11 @@ export const register: Register = (on, options) => {
       await refreshStatus($, cfg)
       return { text: 'Flightdeck reset.' }
     }
+    if (verb === 'web') {
+      const failed = await openWeb($)
+      isWebOn = true
+      return { text: failed ? `Flightdeck web: ${failed}.` : 'Flightdeck web view opened in the browser; it follows the pane every 2 s.' }
+    }
     if (verb === 'layout') {
       const layout: Layout | null = arg === 'compact' || arg === 'wide' || arg === 'auto' || arg === 'mini' ? arg : null
       if (!layout) return { text: 'Usage: /flightdeck layout auto|compact|wide|mini' }
@@ -318,7 +354,7 @@ export const register: Register = (on, options) => {
     }
     const opened = await openPane($, cfg)
     if (!opened.isPlaced) return { text: `Flightdeck is not shown yet: ${opened.reason}` }
-    return { text: 'Flightdeck opened. Focus it with ctrl+x tab; 1-6 expand cards, f/s/o open the gate rows.' }
+    return { text: 'Flightdeck opened. Focus it with ctrl+x tab; 1-6 expand cards, f/s/o open the gate rows, w opens the web view.' }
   })
 
   on('classic.UserPromptSubmit', async ($, e, next) => {
@@ -699,6 +735,15 @@ export const register: Register = (on, options) => {
       $.clock.now(),
       (monoRead ??= readMono($)),
     ])
+    if (isWebOn && now - webAt >= WEB_EVERY_MS) {
+      webAt = now
+      void writeWeb($, { m, u, g, cards, loops: lp, lines, receipt: r, now }).catch(() => undefined)
+    }
+    const pressWeb = async () => {
+      isWebOn = true
+      const failed = await openWeb($).catch(() => 'could not write the feed')
+      if (failed) await $.ui.toast(`Flightdeck web: ${failed}`)
+    }
     // The body's own width, down to the narrowest dock Claude Code seats (24): a wider drawing is cut off at the frame.
     const W = Math.max(24, e.props.bodyColumns)
     const layout = v.layout ?? cfg.layout
@@ -973,6 +1018,7 @@ export const register: Register = (on, options) => {
                 />
               )
             })}
+            <Button key="gate-web" plain hotkey="w" label="web" onPress={pressWeb} />
           </Box>
           {open
             ? g.recent

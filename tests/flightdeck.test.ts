@@ -1,10 +1,12 @@
 import type { On, RenderElement } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Plugin, TestBody } from 'claude-code/testing'
+import { toWeb, toWebScript } from '../hooks/web'
 
 import {
   DEFAULT_ARCHITECT,
   DEFAULT_GATE,
+  DEFAULT_MAIN,
   DEFAULT_TURN,
   DEFAULT_USAGE,
   COMPACT_TRIES,
@@ -1467,4 +1469,19 @@ test('redact stays fast on a long dotted input', () => {
 
 test('architect advice line masks credentials', () => {
   expect(adviceLineH('password=hunter2')).not.toContain('hunter2')
+})
+
+test('the web feed maps gate verdicts, masks secrets and escapes the script tag', () => {
+  const check = (id: string, verdict: 'rule' | 'ask' | 'deny', detail: string) =>
+    ({ id, tool: 'Bash', bucket: 'shell' as const, verdict, inSubagent: false, detail, at: 0 })
+  const g = {
+    recent: [check('1', 'rule', 'ls'), check('2', 'ask', 'git push'), check('3', 'deny', 'curl -H "Authorization: Bearer sk-ant-abcdefghijklmnopqrstuvwxyz0123"')],
+    totals: { ...DEFAULT_GATE.totals, shell: { rule: 1, ask: 1, cleared: 0, deny: 1 } },
+  }
+  const w = toWeb({ m: { ...DEFAULT_MAIN, model: 'claude-opus-5-5', isRunning: true }, u: DEFAULT_USAGE, g, cards: [], loops: [], lines: [], receipt: null, now: 1 })
+  expect(w.status).toBe('working')
+  expect(w.gate.strip).toBe('acd')
+  expect(w.gate.rows.s.map(r => r.v)).toEqual(['allowed', 'classifier', 'denied'])
+  expect(JSON.stringify(w)).not.toContain('sk-ant-abcdefghijklmnopqrstuvwxyz0123')
+  expect(toWebScript({ ...w, model: '</script>' })).not.toContain('</script>')
 })

@@ -261,7 +261,13 @@ document.addEventListener("keydown",function(e){
   else if(e.key==="Escape"){view.card=null;view.gate=null;render()}
 });
 function load(){
-  if(location.protocol==="file:")return;
+  // From disk the plugin's feed is state.js (fetch is blocked on file://): reload it as a script each poll.
+  if(location.protocol==="file:"){
+    var old=document.getElementById("feed");if(old)old.remove();
+    var s=document.createElement("script");s.id="feed";s.src="state.js?"+Date.now();
+    s.onload=function(){if(window.FD_STATE){S=window.FD_STATE;window.FD_STATE=null;lastOk=Date.now();render()}};
+    s.onerror=function(){};document.head.appendChild(s);return;
+  }
   fetch("state.json",{cache:"no-store"}).then(function(r){return r.ok?r.json():null}).then(function(d){if(d){S=d;lastOk=Date.now();render()}}).catch(function(){});
 }
 // Themes: "Claude" (the pane's own colours) plus Tabby community schemes (MIT, schemes.js).
