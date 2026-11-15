@@ -17,8 +17,8 @@ body{font:18px/1.3 "Cascadia Mono","Cascadia Code",Consolas,monospace;font-varia
 ::selection{background:var(--agent);color:var(--bg)}
 ::-webkit-scrollbar{width:8px}::-webkit-scrollbar-thumb{background:var(--faint)}
 .pane{max-width:1800px;margin:0 auto}
-.grid{display:grid;grid-template-columns:minmax(44ch,1fr) minmax(70ch,2fr) minmax(50ch,1.3fr);gap:0 2ch;align-items:start}
-@media (max-width:1400px){.grid{grid-template-columns:minmax(44ch,1fr) minmax(60ch,2fr)}.col3{grid-column:1/-1}}
+.grid{display:grid;grid-template-columns:minmax(36ch,1fr) minmax(48ch,2fr) minmax(36ch,1.3fr);gap:0 2ch;align-items:start}
+@media (max-width:1500px){.grid{grid-template-columns:minmax(36ch,1fr) minmax(0,2fr)}.col3{grid-column:1/-1}}
 @media (max-width:900px){.grid{grid-template-columns:1fr}.grid.flat{display:flex!important;flex-direction:column}.grid.flat>*{overflow:visible!important;min-height:auto}.fill{min-height:8em}.topbar{flex-wrap:wrap}}
 .col{min-width:0;display:flex;flex-direction:column;min-height:0}
 html,body{height:100%}
@@ -276,14 +276,42 @@ var ROOT=document.documentElement, ROLE_DEFAULTS={};
 ["bg","text","dim","faint","track","main","agent","gate","cleared","arch","amber","warn"].forEach(function(v){ROLE_DEFAULTS[v]=getComputedStyle(ROOT).getPropertyValue("--"+v).trim()});
 function applyTheme(name){
   var s=(window.TABBY_SCHEMES||{})[name];
-  var m=s?{bg:s[0],text:s[1],dim:s[9]===s[1]?s[8]:mix(s[1],s[0]),faint:floor(s[10],s[1],s[0]),track:s[10],main:s[5],agent:s[6],gate:s[4],cleared:s[14],arch:s[7],amber:s[13],warn:s[3]}:ROLE_DEFAULTS;
+  var m=s?balance({bg:s[0],text:s[1],dim:s[9]===s[1]?s[8]:mix(s[1],s[0]),faint:s[10],track:s[10],main:s[5],agent:s[6],gate:s[4],cleared:s[14],arch:s[7],amber:s[13],warn:s[3]},s.slice(2)):ROLE_DEFAULTS;
   Object.keys(m).forEach(function(k){ROOT.style.setProperty("--"+k,m[k])});
   try{localStorage.setItem("fd-theme",name)}catch(e){}
 }
 function lum(h){var c=[1,3,5].map(function(i){var v=parseInt(h.substr(i,2),16)/255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4)});return .2126*c[0]+.7152*c[1]+.0722*c[2]}
 function ratio(a,b){var x=lum(a),y=lum(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05)}
-// Faint text keeps at least 4.5:1 on the background: step it toward the foreground until it does.
-function floor(c,fg,bg){var w=0;while(ratio(c,bg)<4.5&&w<1){w+=.1;c=mixw(fg,c,w)}return c}
+// Community schemes were made for terminals, not for this page: every role gets a contrast band
+// on the background so text stays readable, dim stays above faint, and lanes stay apart.
+var LANES=["main","agent","gate","arch","warn"];
+function balance(m,ansi){
+  var bg=m.bg;
+  m.text=fit(m.text,bg,7,16);
+  m.dim=fit(m.dim,bg,6,Math.max(6,ratio(m.text,bg)/1.15));
+  m.faint=fit(m.faint,bg,4.5,ratio(m.dim,bg)/1.2);
+  m.track=fit(m.track,bg,1.8,2.5);
+  ["main","agent","gate","cleared","arch","amber","warn"].forEach(function(k){m[k]=fit(m[k],bg,4.5,21)});
+  separate(m,ansi);
+  return m;
+}
+// Moves c toward the far end (white or black) to reach lo, or toward bg to come down to hi.
+function fit(c,bg,lo,hi){
+  var r=ratio(c,bg);if(r>=lo&&r<=hi)return c;
+  var end=r<lo?(ratio("#ffffff",bg)>ratio("#000000",bg)?"#ffffff":"#000000"):bg,goal=r<lo?lo:hi,a=0,b=1;
+  for(var i=0;i<14;i++){var w=(a+b)/2;if((ratio(mixw(end,c,w),bg)<goal)===(r<lo))a=w;else b=w}
+  return mixw(end,c,b);
+}
+function dist(a,b){return Math.hypot.apply(null,[1,3,5].map(function(i){return parseInt(a.substr(i,2),16)-parseInt(b.substr(i,2),16)}))}
+// A lane too close to an earlier one takes the first ANSI colour that is far from all of them.
+function separate(m,ansi){
+  LANES.forEach(function(k,i){
+    var prev=LANES.slice(0,i).map(function(p){return m[p]}),far=function(c){return prev.every(function(p){return dist(p,c)>=60})};
+    if(far(m[k]))return;
+    var pick=ansi.concat(["#e05050","#40c060","#5080ff","#e0c040","#d050d0","#40c0d0"]).map(function(c){return fit(c,m.bg,4.5,21)}).filter(far)[0];
+    if(pick)m[k]=pick;
+  });
+}
 function mixw(a,b,w){var p=function(h,i){return parseInt(h.substr(1+i*2,2),16)};var o="#";for(var i=0;i<3;i++){o+=("0"+Math.round(p(a,i)*w+p(b,i)*(1-w)).toString(16)).slice(-2)}return o}
 function mix(a,b){var p=function(h,i){return parseInt(h.substr(1+i*2,2),16)};var o="#";for(var i=0;i<3;i++){o+=("0"+Math.round(p(a,i)*.62+p(b,i)*.38).toString(16)).slice(-2)}return o}
 (function(){
