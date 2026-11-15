@@ -1,0 +1,166 @@
+{
+ "model": "Opus 5.5",
+ "status": "idle",
+ "effort": "low",
+ "mode": "auto",
+ "req": 26,
+ "ctx": {
+  "pct": 46,
+  "tokens": 139000,
+  "window": 300000,
+  "est": true
+ },
+ "cost": 21.78,
+ "fiveH": 25,
+ "sevenD": 38,
+ "ttft": 5.4,
+ "gate": {
+  "checks": 82,
+  "allowed": 7,
+  "classifier": 75,
+  "denied": 0,
+  "file": 26,
+  "shell": 38,
+  "other": 18,
+  "strip": "ccccccccccaccccccccccccccccccccaccccccccccccccccccccccccccaacccccccccaa",
+  "rows": {
+   "f": [
+    {
+     "v": "allowed",
+     "d": "Edit hooks/core.ts"
+    },
+    {
+     "v": "classifier",
+     "d": "Write scratchpad/index.html"
+    }
+   ],
+   "s": [
+    {
+     "v": "classifier",
+     "d": "git status"
+    },
+    {
+     "v": "classifier",
+     "d": "claude plugin test ."
+    }
+   ],
+   "o": [
+    {
+     "v": "allowed",
+     "d": "mcp progress"
+    }
+   ]
+  }
+ },
+ "agents": [
+  {
+   "label": "Audit verifier candidates",
+   "type": "cs-verdict-reviewer",
+   "model": "Sonnet 5.5",
+   "state": "done",
+   "steps": 4,
+   "t": "0:37",
+   "b": 0,
+   "w": 4,
+   "tools": [
+    "Bash -> cd D:/Work/personal-git-clones/claude-flightdeck",
+    "Bash -> grep -n redact hooks/core.ts",
+    "Read -> tests/flightdeck.test.ts"
+   ],
+   "answer": "{\"records\":[{\"fingerprint\":\"flightdeck:model-text-terminal-control-bytes\",\"verdict\":\"needs_validation\"}]}"
+  },
+  {
+   "label": "Flightdeck ctx warning option",
+   "type": "mod-fixer",
+   "model": "Opus 5.5",
+   "state": "done",
+   "steps": 9,
+   "t": "1:09",
+   "b": 0,
+   "w": 9,
+   "tools": [
+    "Edit -> hooks/register.tsx"
+   ],
+   "answer": "contextWarning option added, 64 pass"
+  },
+  {
+   "label": "Flightdeck audit hardening fixes",
+   "type": "mod-fixer",
+   "model": "Opus 5.5",
+   "state": "done",
+   "steps": 15,
+   "t": "1:55",
+   "b": 14,
+   "w": 13,
+   "tools": [
+    "Edit -> hooks/core.ts"
+   ],
+   "answer": "67 pass, 0 fail"
+  },
+  {
+   "label": "Flightdeck swarm web page sketch",
+   "type": "ui-sketch-builder",
+   "model": "Opus 5.5",
+   "state": "running",
+   "steps": 6,
+   "t": "0:57",
+   "b": 12,
+   "w": 10,
+   "tools": [
+    "Write -> index.html"
+   ],
+   "answer": ""
+  },
+  {
+   "label": "Agent board BRD suggestions",
+   "type": "claude",
+   "model": "Sonnet 5.5",
+   "state": "done",
+   "steps": 6,
+   "t": "0:36",
+   "b": 16,
+   "w": 6,
+   "tools": [
+    "Read -> README.md"
+   ],
+   "answer": "15 suggestions"
+  },
+  {
+   "label": "Verify BRD gaps against code",
+   "type": "sweep-reviewer",
+   "model": "Sonnet 5.5",
+   "state": "error",
+   "steps": 8,
+   "t": "0:39",
+   "b": 26,
+   "w": 6,
+   "tools": [
+    "Grep -> board.py"
+   ],
+   "answer": "stopped at 20 calls"
+  }
+ ],
+ "earlier": 1,
+ "loops": {
+  "seen": 6,
+  "active": 0
+ },
+ "lastTurn": {
+  "secs": 44,
+  "agents": 0,
+  "edits": 1,
+  "cost": 0.23
+ },
+ "log": [
+  {
+   "at": "11:53:51",
+   "src": "engine",
+   "msg": "agent message from a17b5516"
+  },
+  {
+   "at": "11:54:09",
+   "src": "Flightdeck",
+   "msg": "Edit -> claude-flightdeck/HARDENING.md"
+  }
+ ]
+}

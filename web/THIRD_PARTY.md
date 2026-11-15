@@ -1,0 +1,1 @@
+schemes.js: colour schemes from Eugeny/tabby, tabby-community-color-schemes/schemes (MIT licence, https://github.com/Eugeny/tabby). Converted to [bg, fg, color0..15] arrays; 189 of 191 parsed (2 lacked a full 16-colour set).

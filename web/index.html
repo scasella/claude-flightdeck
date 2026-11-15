@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flightdeck</title>
+<style>
+:root{
+  --bg:#0c0c0c; --text:#e8e8e8; --dim:#9a9a9a; --faint:#7a7a7a; --track:#585858;
+  --main:#d97757; --agent:#8f9cf7; --gate:#4eba65; --cleared:#b1b9f9;
+  --arch:#af87ff; --amber:#ffc107; --warn:#ff6b80;
+  --ch:1ch;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text)}
+body{font:18px/1.3 "Cascadia Mono","Cascadia Code",Consolas,monospace;font-variant-numeric:tabular-nums;padding:16px}
+::selection{background:var(--agent);color:var(--bg)}
+::-webkit-scrollbar{width:8px}::-webkit-scrollbar-thumb{background:var(--faint)}
+.pane{max-width:1800px;margin:0 auto}
+.grid{display:grid;grid-template-columns:minmax(44ch,1fr) minmax(70ch,2fr) minmax(50ch,1.3fr);gap:0 2ch;align-items:start}
+@media (max-width:1400px){.grid{grid-template-columns:minmax(44ch,1fr) minmax(60ch,2fr)}.col3{grid-column:1/-1}}
+@media (max-width:900px){.grid{grid-template-columns:1fr}.grid.flat{display:flex!important;flex-direction:column}.grid.flat>*{overflow:visible!important;min-height:auto}.fill{min-height:8em}.topbar{flex-wrap:wrap}}
+.col{min-width:0;display:flex;flex-direction:column;min-height:0}
+html,body{height:100%}
+body{display:flex;flex-direction:column;box-sizing:border-box}
+.pane{flex:1;display:flex;flex-direction:column;min-height:0;width:100%}
+.grid{flex:1;align-items:stretch;min-height:0}
+.fill{flex:1;min-height:12em;overflow:auto;display:flex;flex-direction:column}
+.fill>*{flex:none}.fill>.wrap{flex:none}
+.topbar{display:flex;justify-content:flex-end;gap:1ch;max-width:1800px;width:100%;margin:0 auto}
+.topbar button{background:none;border:0;color:var(--dim);font:inherit;cursor:pointer;padding:0 .5ch}.topbar button:hover{color:var(--text)}#themeName{cursor:pointer;color:var(--dim);text-align:center}#themeFind{width:24ch;background:var(--bg);color:var(--text);border:1px solid var(--faint);font:inherit}
+.topbar label{color:var(--dim)}.tpick{position:relative}.tlist{position:absolute;right:0;top:1.6em;z-index:9;width:30ch;max-height:60vh;overflow:auto;background:var(--bg);border:1px solid var(--agent);padding:.2em 0}.tlist div{padding:0 1ch;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:var(--dim)}.tlist div.on{background:var(--agent);color:var(--bg)}.tlist div.cur{color:var(--text);font-weight:700}.tlist .none{cursor:default}
+.mainband{}
+
+.meters{display:grid;gap:.2em 0}
+.meter .row{overflow:visible}.meter .gwrap{overflow:hidden;white-space:nowrap;font-size:1.1em}
+.facts{display:flex;flex-wrap:wrap;gap:0 2ch;margin-top:.2em}
+.bignum{}
+@media (max-width:900px){.meters{grid-template-columns:1fr}}
+.agents{line-height:1.4}
+.agents .lbl{flex-basis:40ch}
+.small{max-height:11em;overflow:auto;font-size:.9em;flex:none}
+.lbl{flex:0 0 44ch}
+.lane .bar{flex:1;overflow:hidden}
+.log .row .r{margin-left:0;flex:1}
+.hd{text-align:center;margin-bottom:.4em}
+.hd b{font-weight:700}
+.box{border:1px solid currentColor;border-radius:6px;padding:.15em 1ch;margin:.6em 0}
+.box>*{color:var(--text)}
+.row{display:flex;gap:1ch;white-space:nowrap;overflow:hidden}
+.row .r{margin-left:auto}
+.t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wrap{white-space:pre-wrap;word-break:break-all}
+.dim{color:var(--dim)}.faint{color:var(--faint)}.track{color:var(--track)}.live{margin-left:1ch}.sel{color:var(--agent)}.b{font-weight:700}
+.c-main{color:var(--main)}.c-agent{color:var(--agent)}.c-gate{color:var(--gate)}
+.c-cleared{color:var(--cleared)}.c-arch{color:var(--arch)}.c-amber{color:var(--amber)}.c-warn{color:var(--warn)}
+.sec{margin:.6em 0 .1em}
+.lane{cursor:pointer}.lane:hover .lbl{text-decoration:underline}
+.lane:focus-visible,.key:focus-visible{outline:1px solid var(--agent)}
+.bar{letter-spacing:0}
+.foot{margin-top:1em;text-align:center}
+
+/* Layout variants (?layout=2..10). Areas: main gate agents card loops log. */
+.grid.flat{display:grid;gap:.6em 2ch;align-items:stretch}
+.grid.flat>*{min-height:0;overflow:hidden}.grid.flat .box{margin:0}.grid.flat .fill{min-height:0;flex:1;overflow:auto}
+.a-main{grid-area:main}.a-gate{grid-area:gate}.a-agents{grid-area:agents}.a-card{grid-area:card}.a-loops{grid-area:loops}.a-log{grid-area:log}
+.a-agents>.agents{overflow:auto}
+[data-layout="2"] .flat{grid-template:"agents agents agents" 1.4fr "main gate log" 1fr "card card loops" auto/1fr 1fr 1.2fr}
+[data-layout="3"] .flat{grid-template:"main agents" auto "gate agents" 1fr "gate card" 1fr "gate log" 1fr "loops log" auto/40ch 1fr}
+[data-layout="4"] .flat{grid-template:"main main" auto "agents card" 1fr "log log" 1fr "gate loops" auto/1.6fr 1fr}
+[data-layout="5"] .flat{grid-template:"main agents" 1fr "gate card" 1fr "loops log" auto/1fr 1fr}
+[data-layout="5"] .flat>*{border:1px solid var(--faint);padding:.3em 1ch}
+[data-layout="6"] .pane{max-width:100ch}
+[data-layout="6"] .flat{grid-template:"main" auto "gate" auto "agents" auto "card" auto "loops" auto "log" 1fr/1fr}
+[data-layout="7"] .flat{grid-template:"agents log main" auto "agents log gate" 1fr "card log loops" auto/1fr 1.6fr 40ch}
+[data-layout="8"] body,[data-layout="8"]{font-size:15px}
+[data-layout="8"] .flat{grid-template:"main agents agents log" 1fr "gate card loops log" 1fr/1fr 1fr 1fr 1fr}
+[data-layout="9"] .flat{grid-template:"main main main" auto "agents agents gate" 1fr "card log log" 1fr "loops loops loops" auto/1fr 1fr 44ch}
+[data-layout="9"] .a-main .meters{grid-template-columns:repeat(3,1fr);gap:0 4ch}
+[data-layout="9"] .a-main .box{display:flex;flex-wrap:wrap;gap:0 4ch;align-items:center}
+[data-layout="10"] .flat{grid-template:"agents card" minmax(0,1fr) "loops card" auto "main gate" auto "main log" 8em/56ch 1fr}[data-layout="10"] .agents .lbl{flex-basis:32ch}
+.focus{font-size:1.1em;display:flex;flex-direction:column;gap:.35em}
+.focus .ftitle{font-size:1.2em}
+.fmeta{display:flex;flex-wrap:wrap;gap:0 3ch}
+.ftrack{overflow:hidden;white-space:nowrap;font-size:1.2em}
+.fcols{display:grid;grid-template-columns:minmax(0,1fr) 18ch;gap:0 3ch;min-height:0}
+.fanswer{border-left:1px solid var(--faint);padding-left:1ch;color:var(--text)}
+@media (max-width:900px){html,body{height:auto}.pane,.grid.flat{flex:none;height:auto}.grid.flat>*{flex:none;height:auto;min-height:0}.grid.flat .fill{flex:none;max-height:none;overflow:visible}.grid.flat .box{margin:0 0 .6em}}
+</style>
+</head>
+<body>
+<div class="topbar"><span class="dim">theme</span><button id="themePrev" aria-label="previous theme">&lt;</button><span id="themeName" class="b" title="click to search, t / T to cycle"></span><span class="tpick"><input id="themeFind" hidden aria-label="search themes" autocomplete="off" spellcheck="false"><div id="themeList" class="tlist" role="listbox" hidden></div></span><button id="themeNext" aria-label="next theme">&gt;</button></div>
+<main class="pane" id="pane" aria-live="polite"></main>
+<script src="schemes.js"></script>
+<script id="sample" type="application/json">
+{"model":"Opus 5.5","status":"idle","effort":"low","mode":"auto","req":26,
+ "ctx":{"pct":46,"tokens":139000,"window":300000,"est":true},"cost":21.78,"fiveH":25,"sevenD":38,"ttft":5.4,
+ "gate":{"checks":82,"allowed":7,"classifier":75,"denied":0,"file":26,"shell":38,"other":18,
+   "strip":"ccccccccccaccccccccccccccccccccaccccccccccccccccccccccccccaacccccccccaa",
+   "rows":{"f":[{"v":"allowed","d":"Edit hooks/core.ts"},{"v":"classifier","d":"Write scratchpad/index.html"}],
+           "s":[{"v":"classifier","d":"git status"},{"v":"classifier","d":"claude plugin test ."}],
+           "o":[{"v":"allowed","d":"mcp progress"}]}},
+ "agents":[
+  {"label":"Audit verifier candidates","type":"cs-verdict-reviewer","model":"Sonnet 5.5","state":"done","steps":4,"t":"0:37","b":0,"w":4,
+   "tools":["Bash -> cd D:/Work/personal-git-clones/claude-flightdeck","Bash -> grep -n redact hooks/core.ts","Read -> hooks/core.ts:200-260","Read -> hooks/register.tsx:600-660","Grep -> shorten( in hooks","Read -> tests/flightdeck.test.ts","Bash -> grep -n control tests/flightdeck.test.ts"],
+   "answer":"{\"records\":[{\"fingerprint\":\"flightdeck:model-text-terminal-control-bytes\",\"verdict\":\"needs_validation\"}]}"},
+  {"label":"Flightdeck ctx warning option","type":"mod-fixer","model":"Opus 5.5","state":"done","steps":9,"t":"1:09","b":0,"w":9,"tools":["Edit -> hooks/register.tsx"],"answer":"contextWarning option added, 64 pass"},
+  {"label":"Flightdeck audit hardening fixes","type":"mod-fixer","model":"Opus 5.5","state":"done","steps":15,"t":"1:55","b":14,"w":13,"tools":["Edit -> hooks/core.ts"],"answer":"67 pass, 0 fail"},
+  {"label":"Flightdeck swarm web page sketch","type":"ui-sketch-builder","model":"Opus 5.5","state":"running","steps":6,"t":"0:57","b":12,"w":10,"tools":["Write -> index.html"],"answer":""},
+  {"label":"Agent board BRD suggestions","type":"claude","model":"Sonnet 5.5","state":"done","steps":6,"t":"0:36","b":16,"w":6,"tools":["Read -> README.md"],"answer":"15 suggestions"},
+  {"label":"Verify BRD gaps against code","type":"sweep-reviewer","model":"Sonnet 5.5","state":"error","steps":8,"t":"0:39","b":26,"w":6,"tools":["Grep -> board.py"],"answer":"stopped at 20 calls"}],
+ "earlier":1,"loops":{"seen":6,"active":0},
+ "lastTurn":{"secs":44,"agents":0,"edits":1,"cost":0.23},
+ "log":[{"at":"11:53:51","src":"engine","msg":"agent message from a17b5516"},{"at":"11:54:09","src":"Flightdeck","msg":"Edit -> claude-flightdeck/HARDENING.md"}]}
+</script>
+<script>
+"use strict";
+var LAYOUT=Math.max(1,Math.min(10,+(new URLSearchParams(location.search).get("layout")||1)));document.documentElement.dataset.layout=LAYOUT;
+var S=null, view={card:null,gate:null}, TRACK=40;
+function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);return e}
+function add(p){for(var i=1;i<arguments.length;i++){var c=arguments[i];if(c!=null)p.appendChild(typeof c==="string"?document.createTextNode(c):c)}return p}
+function span(cls,text){return el("span",cls,text)}
+function row(){var r=el("div","row");for(var i=0;i<arguments.length;i++)if(arguments[i])r.appendChild(arguments[i]);return r}
+function gauge(pct,n,cls){var f=Math.max(0,Math.min(n,Math.round(pct/100*n)));return add(span("bar"),span(cls,"\u2501".repeat(f)),span("faint","\u2501".repeat(n-f)))}
+function k(n){return n>=1000?Math.round(n/1000)+"k":String(n)}
+function box(color){return el("section","box "+color)}
+var stColor={running:"c-agent",done:"c-gate",error:"c-warn"};
+var SPIN="\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f",spinI=0;
+var stMark={running:"\u280b",done:"\u2713",error:"\u2717"};
+var vColor={allowed:"c-gate",classifier:"c-cleared",denied:"c-warn",pending:"c-amber"};
+
+function mainCard(){
+  var b=box("c-main");
+  add(b,row(span("c-main b t",S.model+" \u00b7 main"),span("r "+(S.status==="idle"?"dim":"c-main"),S.status==="idle"?"\u25cb idle":"\u25cf working")));
+  b.classList.add("mainband");
+  var c=S.ctx,meters=el("div","meters");
+  function meter(label,pct,big,note){
+    var m=el("div","meter");
+    add(m,row(span("dim",label),note?span("faint t",note):null,span("r b"+(big?" bignum":""),pct+"%")));
+    add(m,el("div","gwrap",null));m.lastChild.appendChild(gauge(pct,30,pct>=80?"c-warn":pct>=60?"c-amber":"c-main"));
+    return m;
+  }
+  add(meters,meter("context",c.pct,true,k(c.tokens)+"/"+k(c.window)+(c.est?" est":"")),
+    meter("5h",S.fiveH,false,""),
+    meter("7d",S.sevenD,false,""));
+  var facts=el("div","facts");
+  [["cost","$"+S.cost.toFixed(2)],["effort",S.effort],["mode",S.mode],["requests",S.req],["last ttft",S.ttft+"s"]].forEach(function(f){
+    add(facts,add(span("fact"),span("dim",f[0]+" "),span("b c-main",f[1])))});
+  add(b,meters,facts);
+  return b;
+}
+function gateCard(){
+  var g=S.gate,b=box("c-gate");
+  add(b,row(span("c-gate b","GATE \u00b7 permissions"),span("r dim",g.checks+" checks")));
+  var strip=span("bar t");
+  for(var i=0;i<g.strip.length;i++){var ch=g.strip[i];strip.appendChild(span(ch==="a"?"c-gate":ch==="d"?"c-warn":"c-cleared","\u25a0"))}
+  add(b,row(strip));
+  add(b,row(add(span(),span("c-gate","\u25a0 "),g.allowed+" allowed"),add(span(),span("c-cleared","\u25a0 "),g.classifier+" classifier"),add(span(),span("c-warn","\u2717 "),g.denied+" denied")));
+  var keys=row();
+  [["f","file",g.file],["s","shell",g.shell],["o","other",g.other]].forEach(function(x){
+    var s=add(span("key"+(view.gate===x[0]?" b c-gate":"")),span("dim","["),span("b c-gate",x[0]),span("dim","] "),x[1]+" "+x[2]+"  ");s.tabIndex=0;s.onclick=function(){toggleGate(x[0])};keys.appendChild(s)});
+  add(b,keys);
+  b.classList.add("fill");
+  var keysShown=view.gate?[view.gate]:["f","s","o"];
+  if(!view.gate)add(b,el("div","faint sec","recent checks"));
+  keysShown.forEach(function(gk){(g.rows[gk]||[]).forEach(function(r){add(b,row(span(vColor[r.v]||"dim",r.v==="denied"?"\u2717":"\u25a0"),span("dim",r.v),span("t",r.d)))})});
+  return b;
+}
+function lanes(){
+  var a=S.agents,run=a.filter(function(x){return x.state==="running"}).length,frag=document.createDocumentFragment();
+  add(frag,add(el("div","row sec"),span("b","agents"),span("dim","\u00b7 "+run+" running \u00b7 "+a.length+" total"),span("r faint","1-"+Math.min(6,a.length)+" expand")));
+  if(!a.length){add(frag,el("div","faint","no subagents yet"));return frag}
+  if(S.earlier)add(frag,el("div","faint","+"+S.earlier+" earlier"));
+  a.forEach(function(c,i){
+    var before=Math.min(c.b,TRACK-1),bar=Math.max(1,Math.min(c.w,TRACK-before)),after=TRACK-before-bar;
+    var r=add(el("div","row lane"),span(stColor[c.state]+(c.state==="running"?" spin":""),stMark[c.state]),add(span("t lbl "+(view.card===i?"b":"")),span(view.card===i?"sel b":"faint",view.card===i?"> ":"  "),(i+1)+": "+c.label),
+      add(span("r bar"),span("track","\u00b7".repeat(before)),span(stColor[c.state],"\u2501".repeat(bar)),span("track","\u00b7".repeat(after))),span("dim",c.t));
+    r.title=c.type+" · "+c.model+" · "+c.steps+" steps";r.tabIndex=0;r.onclick=function(){toggleCard(i)};frag.appendChild(r)});
+  return frag;
+}
+function focusCard(i){
+  // Layout 10: the open agent is the hero - meta, timeline, full tool trail, tool tally, answer.
+  var c=S.agents[i];if(!c)return null;
+  var b=box(c.state==="error"?"c-warn":c.state==="running"?"c-agent":"c-gate");b.classList.add("focus");
+  add(b,row(span(stColor[c.state]+(c.state==="running"?" spin":""),stMark[c.state]),span("b t ftitle",(i+1)+": "+c.label),span("r dim","[ ] prev/next")));
+  var meta=el("div","fmeta");
+  [["type",c.type],["model",c.model],["state",c.state],["steps",c.steps],["elapsed",c.t]].forEach(function(m){
+    add(meta,add(span(),span("dim",m[0]+" "),span("b "+(m[0]==="state"?stColor[c.state]:""),m[1])))});
+  add(b,meta);
+  var before=Math.min(c.b,TRACK-1),bar=Math.max(1,Math.min(c.w,TRACK-before));
+  add(b,add(el("div","ftrack bar"),span("track","·".repeat(before)),span(stColor[c.state],"━".repeat(bar)),span("track","·".repeat(Math.max(0,TRACK-before-bar)))));
+  var cols=el("div","fcols"),trail=el("div","ftrail"),tally=el("div","ftally");
+  add(trail,el("div","faint sec","tool trail"));
+  c.tools.forEach(function(t,j){var parts=t.split(" -> ");add(trail,row(span("faint",String(j+1).padStart(2," ")),span("c-agent b",parts[0]),span("t",parts.slice(1).join(" -> "))))});
+  var counts={};c.tools.forEach(function(t){var n=t.split(" ")[0];counts[n]=(counts[n]||0)+1});
+  add(tally,el("div","faint sec","tools used"));
+  Object.keys(counts).forEach(function(n){add(tally,row(span("c-agent",n),span("r b",counts[n])))});
+  add(cols,trail,tally);add(b,cols);
+  add(b,el("div","faint sec","answer"));
+  add(b,el("div","wrap fanswer",c.answer?c.answer:(c.state==="running"?"still working...":"no answer")));
+  return b;
+}
+function expanded(){
+  if(LAYOUT===10){if(view.card==null){var r=S.agents.findIndex(function(a){return a.state==="running"});view.card=r>=0?r:0}return focusCard(view.card)}
+  var c=S.agents[view.card];if(!c)return null;
+  var b=box(c.state==="error"?"c-warn":"c-agent");b.style.color="var(--dim)";
+  add(b,el("div","t b",c.label));
+  add(b,el("div","t dim",c.type+" \u00b7 "+c.model+" \u00b7 "+c.state+" \u00b7 "+c.steps+" steps"));
+  c.tools.forEach(function(t){add(b,el("div","t","\u00b7 "+t))});
+  if(c.answer)add(b,el("div","wrap dim","\u00bb "+c.answer));
+  return b;
+}
+function tail(){
+  var f=document.createDocumentFragment(),l=S.loops;
+  add(f,add(el("div","row sec"),span("b","other loops"),span("dim",l.seen+" seen \u00b7 "+l.active+" active"),span("faint","\u25cb".repeat(l.seen))));f.firstChild.lastChild.title=l.seen+" loops seen, "+l.active+" active";
+  var t=S.lastTurn,b=box("c-main");
+  add(b,row(span("c-gate","\u2713"),span("t","last turn "+t.secs+"s \u00b7 "+t.agents+" agents \u00b7 "+t.edits+" edit"),span("r c-main","+$"+t.cost.toFixed(2))));
+  f.appendChild(b);
+  var lg=box("c-agent log fill");add(lg,el("div","","session log"));
+  S.log.slice(-40).forEach(function(e){add(lg,row(span("faint",e.at),span("c-agent b",e.src),span("r t",e.msg)))});
+  f.appendChild(lg);return f;
+}
+var lastOk=0;
+function liveTag(){var t=span("live t");t.id="liveTag";paintLive(t);return t}
+function paintLive(t){t=t||document.getElementById("liveTag");if(!t)return;
+  if(location.protocol==="file:"){t.className="live faint";t.textContent="sample";return}
+  var a=lastOk?Math.round((Date.now()-lastOk)/1000):-1;
+  t.className="live "+(a<0||a>10?"c-warn":"c-gate");t.textContent=a<0?"no feed":a>10?"stale "+a+"s":"live"}
+function render(){
+  var p=document.getElementById("pane");p.textContent="";
+  add(p,add(el("div","hd"),add(el("div"),span("b","FLIGHTDECK \u00b7 "),span("c-main b",S.model.toUpperCase()),span("b"," "+S.status.toUpperCase()),liveTag()),
+    add(el("div"),span("c-main","\u25a0"),span("dim"," main  "),span("c-agent","\u25a0"),span("dim"," agents  "),span("c-gate","\u25a0"),span("dim"," gate"))));
+  var foot=el("div","foot faint","1-6 expand \u00b7 f/s/o gate rows \u00b7 t theme \u00b7 esc back");
+  var ex=expanded()||add(el("div","box faint"),"press 1-6 to open an agent");
+  var ag=add(el("section","box c-agent agents fill"),lanes());
+  if(LAYOUT>1){
+    // Flat grid: each block is a named area; body[data-layout] picks the arrangement.
+    var fg=el("div","grid flat");
+    var tl=tail(),loops=el("div","a-loops");loops.appendChild(tl.firstChild);loops.appendChild(tl.firstChild);
+    var log=el("div","a-log col");log.appendChild(tl.firstChild);log.firstChild.classList.add("fill");
+    function area(n,node){var w=el("div","a-"+n+" col");w.appendChild(node);return w}
+    ex.classList.add("fill");
+    add(fg,area("main",mainCard()),area("gate",gateCard()),area("agents",ag),area("card",ex),loops,log);
+    add(p,fg,foot);return;
+  }
+  var g=el("div","grid"),c1=el("div","col"),c2=el("div","col"),c3=el("div","col col3");
+  add(c1,mainCard());
+  add(c1,gateCard());
+  ex.classList.add("small");
+  add(c2,ag,ex);
+  add(c3,tail());
+  add(p,add(g,c1,c2,c3),foot);
+}
+function toggleCard(i){view.card=view.card===i?null:i;render()}
+function toggleGate(g){view.gate=view.gate===g?null:g;render()}
+document.addEventListener("keydown",function(e){
+  if(e.ctrlKey||e.metaKey||e.altKey)return;
+  if(/^[1-6]$/.test(e.key)&&S.agents[+e.key-1])toggleCard(+e.key-1);
+  else if("fso".indexOf(e.key)>=0&&e.key.length===1)toggleGate(e.key);
+  else if(LAYOUT===10&&(e.key==="["||e.key==="]")&&S.agents.length){view.card=((view.card||0)+(e.key==="]"?1:-1)+S.agents.length)%S.agents.length;render()}
+  else if(e.key==="Escape"){view.card=null;view.gate=null;render()}
+});
+function load(){
+  if(location.protocol==="file:")return;
+  fetch("state.json",{cache:"no-store"}).then(function(r){return r.ok?r.json():null}).then(function(d){if(d){S=d;lastOk=Date.now();render()}}).catch(function(){});
+}
+// Themes: "Claude" (the pane's own colours) plus Tabby community schemes (MIT, schemes.js).
+// Scheme array: [bg, fg, color0..color15]; roles map onto ANSI slots the way terminals tint them.
+var ROOT=document.documentElement, ROLE_DEFAULTS={};
+["bg","text","dim","faint","track","main","agent","gate","cleared","arch","amber","warn"].forEach(function(v){ROLE_DEFAULTS[v]=getComputedStyle(ROOT).getPropertyValue("--"+v).trim()});
+function applyTheme(name){
+  var s=(window.TABBY_SCHEMES||{})[name];
+  var m=s?{bg:s[0],text:s[1],dim:s[9]===s[1]?s[8]:mix(s[1],s[0]),faint:floor(s[10],s[1],s[0]),track:s[10],main:s[5],agent:s[6],gate:s[4],cleared:s[14],arch:s[7],amber:s[13],warn:s[3]}:ROLE_DEFAULTS;
+  Object.keys(m).forEach(function(k){ROOT.style.setProperty("--"+k,m[k])});
+  try{localStorage.setItem("fd-theme",name)}catch(e){}
+}
+function lum(h){var c=[1,3,5].map(function(i){var v=parseInt(h.substr(i,2),16)/255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4)});return .2126*c[0]+.7152*c[1]+.0722*c[2]}
+function ratio(a,b){var x=lum(a),y=lum(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05)}
+// Faint text keeps at least 4.5:1 on the background: step it toward the foreground until it does.
+function floor(c,fg,bg){var w=0;while(ratio(c,bg)<4.5&&w<1){w+=.1;c=mixw(fg,c,w)}return c}
+function mixw(a,b,w){var p=function(h,i){return parseInt(h.substr(1+i*2,2),16)};var o="#";for(var i=0;i<3;i++){o+=("0"+Math.round(p(a,i)*w+p(b,i)*(1-w)).toString(16)).slice(-2)}return o}
+function mix(a,b){var p=function(h,i){return parseInt(h.substr(1+i*2,2),16)};var o="#";for(var i=0;i<3;i++){o+=("0"+Math.round(p(a,i)*.62+p(b,i)*.38).toString(16)).slice(-2)}return o}
+(function(){
+  // Terminal-style picker: [<] name [>] , t / T cycle, click the name to search.
+  var names=["Claude"].concat(Object.keys(window.TABBY_SCHEMES||{})),cur=0;
+  var nameEl=document.getElementById("themeName"),inp=document.getElementById("themeFind"),dl=document.getElementById("themeList");
+
+  function set(i){cur=(i+names.length)%names.length;nameEl.textContent=names[cur];applyTheme(names[cur])}
+  var saved="Claude";try{saved=localStorage.getItem("fd-theme")||"Claude"}catch(e){}
+  var q=new URLSearchParams(location.search).get("theme");if(q)saved=q;
+  set(Math.max(0,names.indexOf(saved)));
+  document.getElementById("themePrev").onclick=function(){set(cur-1)};
+  document.getElementById("themeNext").onclick=function(){set(cur+1)};
+  // Own list instead of <datalist>: themed, keyboard driven, previews on hover.
+  var hits=[],hi=0,before=0;
+  function fill(){var q=inp.value.toLowerCase();hits=names.map(function(n,i){return i}).filter(function(i){return names[i].toLowerCase().indexOf(q)>=0});
+    hi=Math.max(0,Math.min(hi,hits.length-1));dl.textContent="";
+    if(!hits.length){dl.appendChild(el("div","none faint","no match"));return}
+    hits.forEach(function(ix,j){var d=el("div",(j===hi?"on ":"")+(ix===before?"cur":""),names[ix]);d.setAttribute("role","option");
+      d.onmousedown=function(e){e.preventDefault();close(ix)};d.onmouseenter=function(){hi=j;mark();applyTheme(names[ix])};dl.appendChild(d)})}
+  function mark(){Array.prototype.forEach.call(dl.children,function(d,j){d.classList.toggle("on",j===hi)});var c=dl.children[hi];if(c)c.scrollIntoView({block:"nearest"})}
+  function open(){before=cur;nameEl.hidden=true;inp.hidden=false;dl.hidden=false;inp.value="";hi=Math.max(0,before);fill();mark();inp.focus()}
+  function close(pick){inp.hidden=true;dl.hidden=true;nameEl.hidden=false;set(pick==null?before:pick)}
+  nameEl.onclick=open;
+  inp.oninput=function(){hi=0;fill();if(hits.length)applyTheme(names[hits[0]])};
+  inp.onblur=function(){if(!inp.hidden)close(null)};
+  inp.onkeydown=function(e){e.stopPropagation();
+    if(e.key==="Escape"){e.preventDefault();close(null)}
+    else if(e.key==="Enter"){e.preventDefault();close(hits.length?hits[hi]:null)}
+    else if(e.key==="ArrowDown"||e.key==="ArrowUp"){e.preventDefault();if(!hits.length)return;hi=(hi+(e.key==="ArrowDown"?1:-1)+hits.length)%hits.length;mark();applyTheme(names[hits[hi]])}};
+  document.addEventListener("keydown",function(e){if(e.ctrlKey||e.metaKey||e.altKey)return;if(e.key==="t")set(cur+1);else if(e.key==="T")set(cur-1)});
+})();
+S=JSON.parse(document.getElementById("sample").textContent);
+var q=new URLSearchParams(location.search);
+if(q.get("state")==="empty"){S.agents=[];S.earlier=0}
+if(q.get("card"))view.card=+q.get("card")-1;
+render();load();setInterval(load,2000);setInterval(function(){paintLive()},1000);
+setInterval(function(){spinI=(spinI+1)%SPIN.length;document.querySelectorAll(".spin").forEach(function(e){e.textContent=SPIN[spinI]})},120);
+</script>
+</body>
+</html>
