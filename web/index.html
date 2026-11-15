@@ -51,7 +51,10 @@ body{display:flex;flex-direction:column;box-sizing:border-box}
 .row .r{margin-left:auto}
 .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wrap{white-space:pre-wrap;word-break:break-all}
-.dim{color:var(--dim)}.faint{color:var(--faint)}.track{color:var(--track)}.pulse{animation:pulse 1.2s ease-in-out infinite}@keyframes pulse{50%{opacity:.45}}.live{margin-left:1ch}.sel{color:var(--agent)}.b{font-weight:700}
+.dim{color:var(--dim)}.faint{color:var(--faint)}.track{color:var(--track)}.pulse{animation:pulse 1.2s ease-in-out infinite}@keyframes pulse{50%{opacity:.45}}
+/* Theme switch: colours crossfade rather than snap. */
+body,body *{transition:color .2s ease-out,background-color .2s ease-out,border-color .2s ease-out}
+.live{margin-left:1ch}.sel{color:var(--agent)}.b{font-weight:700}
 .c-main{color:var(--main)}.c-agent{color:var(--agent)}.c-gate{color:var(--gate)}
 .c-cleared{color:var(--cleared)}.c-arch{color:var(--arch)}.c-amber{color:var(--amber)}.c-warn{color:var(--warn)}
 .sec{margin:.6em 0 .1em}
@@ -124,8 +127,9 @@ function row(){var r=el("div","row");for(var i=0;i<arguments.length;i++)if(argum
 // Agent bar: fill against the typical run time; past it the bar pulses instead of claiming more.
 // Widths are percentages so the bar scales with its column instead of being cut off.
 function agentBar(c,cls){
-  var pct=Math.max(3,Math.round(c.fill*100)),done=span(stColor[c.state]+(c.over?" pulse":""),"━".repeat(TRACK*2)),rest=span("track","·".repeat(TRACK*2));
-  done.style.cssText="flex:none;overflow:hidden;width:"+pct+"%";rest.style.cssText="flex:1;overflow:hidden";
+  // A feed from an older plugin carries only the timeline width.
+  var fill=c.fill!=null?c.fill:(c.w||TRACK)/TRACK,pct=Math.max(3,Math.round(fill*100)),done=span(stColor[c.state]+(c.over?" pulse":""),"━".repeat(TRACK*2)),rest=span("track","·".repeat(TRACK*2));
+  done.style.cssText="flex:none;overflow:hidden;width:"+pct+"%";done.dataset.pct=pct;done.classList.add("fillbar");rest.style.cssText="flex:1;overflow:hidden";
   var b=add(span(cls),done,rest);b.style.display="flex";return b;
 }
 function gauge(pct,n,cls){var f=Math.max(0,Math.min(n,Math.round(pct/100*n)));return add(span("bar"),span(cls,"\u2501".repeat(f)),span("faint","\u2501".repeat(n-f)))}
@@ -181,6 +185,7 @@ function lanes(){
   a.forEach(function(c,i){
     var r=add(el("div","row lane"),span(stColor[c.state]+(c.state==="running"?" spin":""),stMark[c.state]),add(span("t lbl "+(view.card===i?"b":"")),span(view.card===i?"sel b":"faint",view.card===i?"> ":"  "),(i+1)+": "+c.label),
       agentBar(c,"r bar"),span("dim",c.t));
+    r.dataset.key=i+":"+c.label;r.dataset.state=c.state;
     r.title=c.type+" · "+c.model+" · "+c.steps+" steps";r.tabIndex=0;r.onclick=function(){toggleCard(i)};frag.appendChild(r)});
   return frag;
 }
@@ -222,7 +227,7 @@ function tail(){
   add(b,row(span("c-gate","\u2713"),span("t","last turn "+t.secs+"s \u00b7 "+t.agents+" agents \u00b7 "+t.edits+" edit"),span("r c-main","+$"+t.cost.toFixed(2))));
   f.appendChild(b);
   var lg=box("c-agent log fill");add(lg,el("div","","session log"));
-  S.log.slice(-40).forEach(function(e){add(lg,row(span("faint",e.at),span("c-agent b",e.src),span("r t",e.msg)))});
+  S.log.slice(-40).forEach(function(e){var r=row(span("faint",e.at),span("c-agent b",e.src),span("r t",e.msg));r.dataset.key=e.at+e.src+e.msg;add(lg,r)});
   f.appendChild(lg);return f;
 }
 var lastOk=0;
@@ -231,8 +236,33 @@ function paintLive(t){t=t||document.getElementById("liveTag");if(!t)return;
   if(location.protocol==="file:"){t.className="live faint";t.textContent="sample";return}
   var a=lastOk?Math.round((Date.now()-lastOk)/1000):-1;
   t.className="live "+(a<0||a>10?"c-warn":"c-gate");t.textContent=a<0?"no feed":a>10?"stale "+a+"s":"live"}
+// Motion explains what changed between two feeds: bars glide from their last fill, a finished
+// agent's mark flashes once, new log lines arrive tinted. The first render stays still.
+var CALM=matchMedia("(prefers-reduced-motion: reduce)");
+function snapshot(p){
+  var s={bars:{},states:{},log:{}};
+  p.querySelectorAll(".lane").forEach(function(r){var f=r.querySelector(".fillbar");s.bars[r.dataset.key]=f?f.dataset.pct:null;s.states[r.dataset.key]=r.dataset.state});
+  p.querySelectorAll(".log .row").forEach(function(r){s.log[r.dataset.key]=1});
+  return s;
+}
+function animateChanges(p,prev){
+  var EASE="cubic-bezier(0.16, 1, 0.3, 1)";
+  p.querySelectorAll(".lane").forEach(function(r){
+    var k=r.dataset.key,f=r.querySelector(".fillbar"),was=prev.bars[k];
+    if(f&&was!=null&&was!==f.dataset.pct&&!CALM.matches)f.animate([{width:was+"%"},{width:f.dataset.pct+"%"}],{duration:600,easing:EASE});
+    if(prev.states[k]==="running"&&r.dataset.state!=="running"){var m=r.firstChild;
+      m.animate(CALM.matches?[{opacity:.3},{opacity:1}]:[{transform:"scale(1.8)",filter:"brightness(1.8)"},{transform:"none",filter:"none"}],{duration:500,easing:EASE})}
+  });
+  p.querySelectorAll(".log .row").forEach(function(r){
+    if(!prev.log[r.dataset.key])r.animate([{backgroundColor:"color-mix(in srgb, var(--agent) 28%, transparent)",opacity:.2},{backgroundColor:"transparent",opacity:1}],{duration:700,easing:EASE})});
+}
 function render(){
-  var p=document.getElementById("pane");p.textContent="";
+  var p=document.getElementById("pane"),prev=p.firstChild?snapshot(p):null;
+  renderPane(p);
+  if(prev)animateChanges(p,prev);
+}
+function renderPane(p){
+  p.textContent="";
   add(p,add(el("div","hd"),add(el("div"),span("b","FLIGHTDECK \u00b7 "),span("c-main b",S.model.toUpperCase()),span("b"," "+S.status.toUpperCase()),liveTag()),
     add(el("div"),span("c-main","\u25a0"),span("dim"," main  "),span("c-agent","\u25a0"),span("dim"," agents  "),span("c-gate","\u25a0"),span("dim"," gate"))));
   var foot=el("div","foot faint","1-6 expand \u00b7 f/s/o gate rows \u00b7 t theme \u00b7 esc back");
