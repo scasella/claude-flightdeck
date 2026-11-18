@@ -9,6 +9,7 @@ import {
   DEFAULT_USAGE,
   COMPACT_TRIES,
   addCard,
+  cardsFit,
   cellWidth,
   piecesThatFit,
   afterCompactRead,
@@ -348,6 +349,39 @@ test('subagents become cards, then swimlanes past the card limit; a card expands
     const lanesUi = await $.ui.mount({ ...pane(64), surface })
     expect(await lanesUi.find({ text: /4 total/ })).toBeDefined()
     expect(await lanesUi.find({ text: /━/ })).toBeDefined()
+    await lanesUi.unmount()
+  }
+})
+
+test('cards fit 20 columns and a gap each, between one and the limit', () => {
+  expect([cardsFit(24, 3), cardsFit(41, 3), cardsFit(62, 3), cardsFit(64, 3), cardsFit(120, 3), cardsFit(120, 6)]).toEqual([1, 2, 3, 3, 3, 5])
+})
+
+// #32: the receipt sat flush against swimlanes, or against an expanded card, with no connector between.
+test('the panel below the agents gets a connector unless the cards end on their merge rail', async ($, on) => {
+  engine(on)
+  let n = 0
+  on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: `gp${++n}` }))
+  await $.turn.start({ text: 'fan out', turnId: 'GP1' }) // a turn running: the receipt shows below the agents
+  await $.agent.spawn(spawn('general-purpose', 'Write the parser tests'))
+  await $.agent.spawn(spawn('Explore', 'Map the call sites'))
+
+  const cardsUi = await $.ui.mount({ ...pane(64), surface: 'terminal' })
+  expect(await cardsUi.find({ key: 'merge' })).toBeDefined()
+  expect(await cardsUi.find({ key: 'link-receipt' })).toBeUndefined() // the merge rail leads on
+  await cardsUi.press({ key: 'card-gp1' })
+  expect(await cardsUi.find({ text: /^Write the parser tests$/ })).toBeDefined() // expanded below the cards
+  expect(await cardsUi.find({ key: 'link-receipt' })).toBeDefined()
+  await cardsUi.press({ key: 'card-gp1' })
+  expect(await cardsUi.find({ key: 'link-receipt' })).toBeUndefined()
+  await cardsUi.unmount()
+
+  await $.agent.spawn(spawn('general-purpose', 'Implement the parser'))
+  await $.agent.spawn(spawn('general-purpose', 'Review the parser'))
+  for (const cols of [40, 64, 120]) {
+    const lanesUi = await $.ui.mount({ ...pane(cols), surface: 'terminal' })
+    expect(await lanesUi.find({ text: /━/ })).toBeDefined() // swimlanes
+    expect(await lanesUi.find({ key: 'link-receipt' })).toBeDefined()
     await lanesUi.unmount()
   }
 })

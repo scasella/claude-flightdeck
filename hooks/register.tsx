@@ -46,6 +46,7 @@ import {
   isLoopActive,
   kTokens,
   lanes,
+  cardsFit,
   limitLabel,
   limitOf,
   fmtResetIn,
@@ -993,7 +994,7 @@ export const register: Register = (on, options) => {
 
     const agentsPanel = (w: number) => {
       // Cards need 20 columns each; when the pane can't hold the limit, lanes take over.
-      const fit = Math.max(1, Math.min(cfg.maxCards, Math.floor((w + 1) / 21)))
+      const fit = cardsFit(w, cfg.maxCards)
       const useLanes = cards.length > fit
       const isNarrow = w < 40
       const header = (
@@ -1227,25 +1228,25 @@ export const register: Register = (on, options) => {
       // The agents panel only ends in a downward merge rail as stacked cards with none expanded. As
       // swimlanes, or with a card expanded below them, it ends on a plain box, so the panel after it
       // needs the same connector every other box gets rather than butting straight against it.
-      const agentsFit = Math.max(1, Math.min(cfg.maxCards, Math.floor((w + 1) / 21)))
-      const agentsEndsConnected = cards.length <= agentsFit && !expandedCard
+      // The log's row budget (`used`) has a spare row for lanes; an expanded card's rows are estimated there anyway.
+      const agentsEndsConnected = cards.length <= cardsFit(w, cfg.maxCards) && !expandedCard
       return (
-      <Box flexDirection="column" width={w}>
-        {ps.map((p, i) => {
-          const prev = ps[i - 1]
-          const link =
-            i === 0 || p === 'agents' || (prev === 'agents' && agentsEndsConnected) || p === 'log' || p === 'loops' || prev === 'loops'
-              ? null
-              : rail(`link-${p}`, p === 'architect' ? advising : m.isRunning, p === 'architect' ? C.arch : C.main, w)
-          return (
-            <Box flexDirection="column">
-              {link}
-              {draw(p, w)}
-              {p === 'agents' ? expandedPanel(w) : null}
-            </Box>
-          )
-        })}
-      </Box>
+        <Box flexDirection="column" width={w}>
+          {ps.map((p, i) => {
+            const prev = ps[i - 1]
+            const link =
+              i === 0 || p === 'agents' || (prev === 'agents' && agentsEndsConnected) || p === 'log' || p === 'loops' || prev === 'loops'
+                ? null
+                : rail(`link-${p}`, p === 'architect' ? advising : m.isRunning, p === 'architect' ? C.arch : C.main, w)
+            return (
+              <Box flexDirection="column">
+                {link}
+                {draw(p, w)}
+                {p === 'agents' ? expandedPanel(w) : null}
+              </Box>
+            )
+          })}
+        </Box>
       )
     }
 

@@ -572,6 +572,9 @@ export const lanes = (cards: AgentCard[], now: number, width: number) => {
 
 // ---------------------------------------------------------------- layout
 
+/** How many agent cards sit side by side in `width` cells, 20 each and a gap between: at least one, at most `maxCards`. More agents than that draw as swimlanes. */
+export const cardsFit = (width: number, maxCards: number) => Math.max(1, Math.min(maxCards, Math.floor((width + 1) / 21)))
+
 /** How many log lines fit: what the other panels leave, never fewer than 4 nor more than 8. */
 export const logRows = (bodyRows: number, used: number) => Math.max(4, Math.min(8, bodyRows - used - 3))
 
