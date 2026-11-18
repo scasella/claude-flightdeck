@@ -90,6 +90,8 @@ test('redaction masks quoted values, JSON keys, PEM keys and more token shapes',
   expect(redact('jira ATATT3xFfGF0abcdefghijklmnop12345=AB12CD34')).not.toContain('abcdefghij')
   // A URL's password, whatever the scheme; a URL with no password in it is left alone.
   expect(redact('git clone https://bob:p:a$s@host/r.git')).toBe('git clone https://bob:•••@host/r.git')
+  expect(redact('s3://reader:wJalrXUtnFEMI/K7MDENG/bPxRfiCY@bucket/x')).toBe('s3://reader:•••@bucket/x')
+  expect(redact('two https://u:p1@a and ftp://v:p2@b')).toBe('two https://u:•••@a and ftp://v:•••@b')
   const plain = 'see https://example.com/a:b@c and git+ssh://git@host:repo'
   expect(redact(plain)).toBe(plain)
 })
@@ -97,7 +99,7 @@ test('redaction masks quoted values, JSON keys, PEM keys and more token shapes',
 // Each of these took seconds once, from a pattern that started at every `.`, `-` or `://` of a run and scanned
 // to its end: the URL pattern on main, and the first forms of the JWT and URL patterns in #35.
 test('redaction stays fast on long runs that would make a pattern quadratic', () => {
-  for (const s of ['a.'.repeat(200_000), 'eyJ-'.repeat(100_000), 'a://a:'.repeat(70_000), 'password="'.repeat(40_000), 'sk-'.repeat(130_000)]) {
+  for (const s of ['a.'.repeat(200_000), 'eyJ-'.repeat(100_000), 'a://a:'.repeat(70_000), `x://u:${'p/'.repeat(200_000)}`, 'password="'.repeat(40_000), 'sk-'.repeat(130_000)]) {
     const t0 = Date.now()
     redact(s)
     expect(Date.now() - t0).toBeLessThan(500)

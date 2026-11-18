@@ -382,8 +382,9 @@ const SECRETS: [RegExp, string][] = [
   [/((?:api[_-]?key|access[_-]?token|token|secret|password|passwd|pwd)["']?\s*[=:]\s*)("[^"]*"|'[^']*'|\S+)/gi, '$1•••'],
   [/(--(?:token|password|api-key|secret)[= ])("[^"]*"|'[^']*'|\S+)/gi, '$1•••'],
   [/(\b[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)=)\S+/g, '$1•••'],
-  // The password of a URL's user, any scheme: a URL's user info holds no `/`, which keeps each try short.
-  [/(:\/\/[^\s/:@]+:)[^\s/@]+@/g, '$1•••@'],
+  // The password of a URL's user, any scheme, `/` and all (an AWS secret key has them). It ends before the
+  // next `://`, so a try started at one `://` never scans past another.
+  [/(:\/\/[^\s/:@]+:)(?:(?!:\/\/)[^\s@])+@/g, '$1•••@'],
 ]
 
 /** What the gate drill-down may store: credentials masked before anything is written to state. */
