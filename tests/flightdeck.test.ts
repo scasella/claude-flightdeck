@@ -110,6 +110,7 @@ test('text drawn from tools and agents loses its control bytes, and advice its c
   expect(shorten('a\u001b[2Jb\u009bc\u0007d', 20)).toBe('a[2Jbcd')
   expect(shorten('one\ttwo\r\nthree', 20)).toBe('one two three')
   expect(stripControl('x\u001b]0;title\u0007y\nz')).toBe('x]0;titley\nz')
+  expect(stripControl('a\r\nb\rc\u000bd\u000ce\tf')).toBe('a\nb\nc d e\tf')
   expect(adviceLine('Use password=hunter2 for the db')).toBe('Use password=••• for the db')
 })
 

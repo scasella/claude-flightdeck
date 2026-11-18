@@ -213,10 +213,14 @@ export const prettyModel = (id: string) => {
 
 /**
  * Text with its control bytes taken out (ESC, the 8-bit CSI and the rest of C0 and C1), so a tool's or an
- * agent's text can't move the cursor or restyle the pane. Tab, newline and the other whitespace stay for
- * the caller to collapse.
+ * agent's text can't move the cursor or restyle the pane. Tab and newline stay; a carriage return becomes a
+ * newline, and a vertical tab or form feed a space.
  */
-export const stripControl = (s: string) => s.replace(/[\u0000-\u0008\u000e-\u001f\u007f-\u009f]/g, '')
+export const stripControl = (s: string) =>
+  s
+    .replace(/\r\n?/g, '\n')
+    .replace(/[\v\f]/g, ' ')
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '')
 
 export const shorten = (s: string, n: number) => {
   const one = stripControl(s).replace(/\s+/g, ' ').trim()

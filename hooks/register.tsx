@@ -192,7 +192,7 @@ async function consultStarted($: EngineInterface, cfg: Config, id: string, via: 
 
 async function consultEnded($: EngineInterface, cfg: Config, advice: string | null, id?: string) {
   const at = await $.clock.now()
-  const first = advice === null ? null : (redact(advice).split('\n').find(l => l.trim()) ?? null)
+  const first = advice ? (redact(advice).split('\n').find(l => l.trim()) ?? null) : null
   const text = first ? shorten(first.replace(/^[#>*\s-]+/, ''), 160) : null
   await update($, architect, a => endConsult(normalize(DEFAULT_ARCHITECT, a), at, text, id))
   await update($, turn, t => ({ ...normalize(DEFAULT_TURN, t), isReviewing: false }))
@@ -591,7 +591,7 @@ export const register: Register = (on, options) => {
       type: e.name ?? e.subagentType,
       model: started.model,
       // Kept whole for the expanded card, so masked and cleaned here rather than by a cut.
-      description: stripControl(redact(e.description)),
+      description: stripControl(redact(e.description ?? '')),
       spawnedAt: await $.clock.now(),
     }
     // Decided in the write: a resume whose first step already put its card back to running is not logged again.
