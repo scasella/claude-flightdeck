@@ -211,8 +211,15 @@ export const prettyModel = (id: string) => {
   return shorten(id, 22)
 }
 
+/**
+ * Text with its control bytes taken out (ESC, the 8-bit CSI and the rest of C0 and C1), so a tool's or an
+ * agent's text can't move the cursor or restyle the pane. Tab, newline and the other whitespace stay for
+ * the caller to collapse.
+ */
+export const stripControl = (s: string) => s.replace(/[\u0000-\u0008\u000e-\u001f\u007f-\u009f]/g, '')
+
 export const shorten = (s: string, n: number) => {
-  const one = s.replace(/\s+/g, ' ').trim()
+  const one = stripControl(s).replace(/\s+/g, ' ').trim()
   return n <= 0 ? '' : one.length > n ? `${one.slice(0, Math.max(0, n - 1)).trimEnd()}…` : one
 }
 
@@ -358,14 +365,25 @@ export const limitLabel = (kind: string) =>
 
 // ---------------------------------------------------------------- redaction
 
+// Each pattern runs in time linear in its input: redact sees whole commands, prompts and answers before
+// they are cut, inside hooks a tool call waits on. A pattern that can start at many points of one run of
+// characters and scan to the run's end each time (`\b` before a class that holds `-` or `.`) is quadratic.
 const SECRETS: [RegExp, string][] = [
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, '•••'],
   [/(authorization\s*[:=]\s*)(bearer\s+|basic\s+)?\S+/gi, '$1$2•••'],
   [/\b(bearer)\s+[A-Za-z0-9._~+/-]{8,}=*/gi, '$1 •••'],
-  [/\b(sk|pk|rk|ghp|gho|ghs|github_pat|xox[abprs])[-_][A-Za-z0-9_-]{8,}/g, '•••'],
-  [/((?:api[_-]?key|access[_-]?token|token|secret|password|passwd|pwd)\s*[=:]\s*)("[^"]*"|'[^']*'|\S+)/gi, '$1•••'],
-  [/(--(?:token|password|api-key|secret)[= ])\S+/gi, '$1•••'],
+  [/\b(sk|pk|rk|ghp|gho|ghs|ghu|ghr|github_pat|xox[abprs])[-_][A-Za-z0-9_-]{8,}/g, '•••'],
+  [/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, '•••'],
+  [/\bAIza[0-9A-Za-z_-]{35}/g, '•••'],
+  // A JWT: three base64url parts, the first a JSON header. Not `\b`: that would start at each `eyJ` after a `-`.
+  [/(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]+/g, '•••'],
+  [/\bATATT[A-Za-z0-9_=-]{10,}/g, '•••'],
+  // The quote a key may end on is JSON's: {"password":"x"}. An unquoted value runs to whitespace, commas and all.
+  [/((?:api[_-]?key|access[_-]?token|token|secret|password|passwd|pwd)["']?\s*[=:]\s*)("[^"]*"|'[^']*'|\S+)/gi, '$1•••'],
+  [/(--(?:token|password|api-key|secret)[= ])("[^"]*"|'[^']*'|\S+)/gi, '$1•••'],
   [/(\b[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)=)\S+/g, '$1•••'],
-  [/(\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:)[^\s@]+@/gi, '$1•••@'],
+  // The password of a URL's user, any scheme: a URL's user info holds no `/`, which keeps each try short.
+  [/(:\/\/[^\s/:@]+:)[^\s/@]+@/g, '$1•••@'],
 ]
 
 /** What the gate drill-down may store: credentials masked before anything is written to state. */
@@ -656,10 +674,10 @@ export const handbackOf = (text: string): { from: string; body: string } | null 
   return body ? { from, body } : null
 }
 
-/** The advice line a pane shows for a report: its first real line, markdown markers stripped, cut to 160. */
+/** The advice line a pane shows for a report: its first real line, credentials masked, markdown markers stripped, cut to 160. */
 export const adviceLine = (report: string) => {
   const first = report.split('\n').map(l => l.trim()).find(l => l && !l.startsWith('[') && !l.startsWith('<')) ?? ''
-  return shorten(first.replace(/\*\*|__/g, '').replace(/^[#>*\s-]+/, ''), 160)
+  return shorten(redact(first).replace(/\*\*|__/g, '').replace(/^[#>*\s-]+/, ''), 160)
 }
 
 export const elapsedOf = (c: AgentCard, now: number) => (c.endedAt ?? now) - c.spawnedAt

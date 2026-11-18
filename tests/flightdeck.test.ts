@@ -48,6 +48,8 @@ import {
   recordCheck,
   redact,
   settleCheck,
+  shorten,
+  stripControl,
   trimRecent,
   startConsult,
   stepSpeed,
@@ -64,6 +66,49 @@ test('redaction masks credentials before anything is stored', () => {
   expect(redact('password=hunter2 ls')).not.toContain('hunter2')
   expect(redact('ls -la src/')).toBe('ls -la src/')
   expect(describeInput('Read', { file_path: 'C:\\Users\\me\\proj\\src\\main.ts' })).toBe('Read → src/main.ts')
+})
+
+// From #35, thanks @ai94iq.
+test('redaction masks quoted values, JSON keys, PEM keys and more token shapes', () => {
+  expect(redact('login --password "two words" next')).toBe('login --password ••• next')
+  expect(redact("login --token 'a b' next")).not.toContain(' b')
+  expect(redact(`curl -d '{"password":"hunter2"}' x`)).not.toContain('hunter2')
+  expect(redact(`{"api_key": "abc123def456ghi", "n": 1}`)).toBe(`{"api_key": •••, "n": 1}`)
+  expect(redact(`{'token':'s3cr3tvalue'}`)).not.toContain('s3cr3tvalue')
+  // An unquoted value is masked up to the next space, commas and braces with it.
+  expect(redact('password=ab,cd next')).toBe('password=••• next')
+  expect(redact('secret: p,ss}w0rd')).toBe('secret: •••')
+  expect(redact('echo "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAsecret\n-----END RSA PRIVATE KEY-----" > k')).toBe('echo "•••" > k')
+  expect(redact('-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk cut off here')).toBe('•••')
+  expect(redact('id AKIAIOSFODNN7EXAMPLE x')).toBe('id ••• x')
+  expect(redact('id ASIAIOSFODNN7EXAMPLE x')).not.toContain('IOSFODNN7')
+  expect(redact('url?k=AIzaSyA1234567890abcdefghijklmnopqrstuv')).not.toContain('1234567890')
+  expect(redact('t eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl x')).toBe('t ••• x')
+  expect(redact('gh ghu_abcdefghijklmnop ghr_abcdefghijklmnop')).toBe('gh ••• •••')
+  expect(redact('gh github_pat_11ABCDEFG0123456789_abcdefXYZ')).not.toContain('0123456789')
+  expect(redact('slack xoxb-1234-5678-abcdEFGH')).not.toContain('abcdEFGH')
+  expect(redact('jira ATATT3xFfGF0abcdefghijklmnop12345=AB12CD34')).not.toContain('abcdefghij')
+  // A URL's password, whatever the scheme; a URL with no password in it is left alone.
+  expect(redact('git clone https://bob:p:a$s@host/r.git')).toBe('git clone https://bob:•••@host/r.git')
+  const plain = 'see https://example.com/a:b@c and git+ssh://git@host:repo'
+  expect(redact(plain)).toBe(plain)
+})
+
+// Each of these took seconds once, from a pattern that started at every `.`, `-` or `://` of a run and scanned
+// to its end: the URL pattern on main, and the first forms of the JWT and URL patterns in #35.
+test('redaction stays fast on long runs that would make a pattern quadratic', () => {
+  for (const s of ['a.'.repeat(200_000), 'eyJ-'.repeat(100_000), 'a://a:'.repeat(70_000), 'password="'.repeat(40_000), 'sk-'.repeat(130_000)]) {
+    const t0 = Date.now()
+    redact(s)
+    expect(Date.now() - t0).toBeLessThan(500)
+  }
+})
+
+test('text drawn from tools and agents loses its control bytes, and advice its credentials', () => {
+  expect(shorten('a\u001b[2Jb\u009bc\u0007d', 20)).toBe('a[2Jbcd')
+  expect(shorten('one\ttwo\r\nthree', 20)).toBe('one two three')
+  expect(stripControl('x\u001b]0;title\u0007y\nz')).toBe('x]0;titley\nz')
+  expect(adviceLine('Use password=hunter2 for the db')).toBe('Use password=••• for the db')
 })
 
 const check = (id: string, verdict: Check['verdict'], bucket: Check['bucket'] = 'shell'): Check => ({
@@ -526,6 +571,25 @@ test("a background architect's advice is read from its hand-back", async ($, on)
   })
   const ui = await $.ui.mount({ ...pane(64), surface: 'terminal' })
   expect(await ui.find({ text: /» Ship it after one more gate test\./ })).toBeDefined()
+  await ui.unmount()
+})
+
+// From #35, thanks @ai94iq: the prompt line, an agent's task and answer, and advice were stored as they came.
+test('prompts, agent tasks and answers, and advice reach the pane masked and without control bytes', async ($, on) => {
+  engine(on)
+  let n = 0
+  on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: `rd${++n}` }))
+  await $.turn.start({ text: 'use AKIAIOSFODNN7EXAMPLE now', turnId: 'RD1' })
+  await $.agent.spawn(spawn('general-purpose', 'deploy with AKIAIOSFODNN7EXAMPLF\u001b[2J'))
+  await $.turn.complete({ answer: 'key AKIAIOSFODNN7EXAMPLG done', durationMs: 10, isAborted: false, turnId: 'RD2', agentId: 'rd1', reason: 'answer' })
+  await $.agent.spawn(spawn('fable-advisor:fable-advisor', 'final review'))
+  await $.turn.complete({ answer: 'Rotate password=hunter2 before shipping.', durationMs: 10, isAborted: false, turnId: 'RD3', agentId: 'rd2', reason: 'answer' })
+  const ui = await $.ui.mount({ ...pane(64), surface: 'terminal' })
+  await ui.press({ key: 'card-rd1' }) // the expanded card: the whole task and the answer
+  for (const text of [/^use ••• now$/, /^deploy with •••\[2J$/, /» key ••• done/, /» Rotate password=••• before shipping\./]) {
+    expect(await ui.find({ text })).toBeDefined()
+  }
+  expect(await ui.find({ text: /IOSFODNN7|hunter2|\u001b/ })).toBeUndefined()
   await ui.unmount()
 })
 

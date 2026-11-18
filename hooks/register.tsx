@@ -33,6 +33,8 @@ import {
   titleLines,
   consultTimeline,
   describeInput,
+  redact,
+  stripControl,
   endConsult,
   fitLegend,
   fmtClock,
@@ -190,7 +192,7 @@ async function consultStarted($: EngineInterface, cfg: Config, id: string, via: 
 
 async function consultEnded($: EngineInterface, cfg: Config, advice: string | null, id?: string) {
   const at = await $.clock.now()
-  const first = advice?.split('\n').find(l => l.trim()) ?? null
+  const first = advice === null ? null : (redact(advice).split('\n').find(l => l.trim()) ?? null)
   const text = first ? shorten(first.replace(/^[#>*\s-]+/, ''), 160) : null
   await update($, architect, a => endConsult(normalize(DEFAULT_ARCHITECT, a), at, text, id))
   await update($, turn, t => ({ ...normalize(DEFAULT_TURN, t), isReviewing: false }))
@@ -351,7 +353,8 @@ export const register: Register = (on, options) => {
       const advice = adviceLine(back.body)
       if (advice && advice !== a.lastAdvice) await noteAdvice($, cfg, advice)
     } else if (e.text) {
-      const p = promptLine(e.text)
+      // Masked before the cut, so a key the cut would split is masked whole.
+      const p = promptLine(redact(e.text))
       await say($, p.who, p.text)
     }
     return next(e)
@@ -587,7 +590,8 @@ export const register: Register = (on, options) => {
       id,
       type: e.name ?? e.subagentType,
       model: started.model,
-      description: e.description,
+      // Kept whole for the expanded card, so masked and cleaned here rather than by a cut.
+      description: stripControl(redact(e.description)),
       spawnedAt: await $.clock.now(),
     }
     // Decided in the write: a resume whose first step already put its card back to running is not logged again.
@@ -633,7 +637,7 @@ export const register: Register = (on, options) => {
       await update($, agents, list =>
         listOf<unknown>(list)
           .map(normalizeCard)
-          .map(c => (c.id === id ? { ...c, status, endedAt: now, answer: shorten(e.answer, 400) } : c)),
+          .map(c => (c.id === id ? { ...c, status, endedAt: now, answer: shorten(redact(e.answer), 400) } : c)),
       )
       // This run's own length: a resumed agent's card clock also spans the idle time between runs.
       const took = fmtDuration(e.durationMs)
