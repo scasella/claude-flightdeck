@@ -37,6 +37,6 @@ If a change needs a newer Claude Code, raise the floor in the README and in `ci.
 - **Behaviour in `hooks/core.ts`.** Reducers and layout rules are pure functions with tests. `register.tsx` wires them to events and draws.
 - **Narrow panes.** Check a drawing change at 24, 40, 64 and 120 columns. The pane draws at its real width down to 24, the narrowest dock Claude Code seats, and a test checks every width from 24 to 40 for anything that spills past its box.
 - **One line, several colours: a row, not nested Texts.** Draw it with `line()` in `register.tsx`, pieces a gap apart. The desktop app wraps the pieces of a Text that nests Texts, and collapses runs of spaces, so a gap belongs to the Box, not the text. A test checks this on every surface.
-- **No secrets in state.** Anything stored from a tool input goes through `redact()` first.
+- **No secrets in state.** Anything stored from a tool input, a prompt, an agent or the architect goes through `redact()` first, before any cut, and each of its patterns runs in time linear in its input.
 
 When you report a bug, include `claude --version` and any dim `flightdeck:` line from the transcript.

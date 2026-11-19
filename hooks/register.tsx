@@ -33,6 +33,8 @@ import {
   titleLines,
   consultTimeline,
   describeInput,
+  redact,
+  stripControl,
   endConsult,
   fitLegend,
   fmtClock,
@@ -46,6 +48,7 @@ import {
   isLoopActive,
   kTokens,
   lanes,
+  cardsFit,
   limitLabel,
   limitOf,
   fmtResetIn,
@@ -189,7 +192,7 @@ async function consultStarted($: EngineInterface, cfg: Config, id: string, via: 
 
 async function consultEnded($: EngineInterface, cfg: Config, advice: string | null, id?: string) {
   const at = await $.clock.now()
-  const first = advice?.split('\n').find(l => l.trim()) ?? null
+  const first = advice ? (redact(advice).split('\n').find(l => l.trim()) ?? null) : null
   const text = first ? shorten(first.replace(/^[#>*\s-]+/, ''), 160) : null
   await update($, architect, a => endConsult(normalize(DEFAULT_ARCHITECT, a), at, text, id))
   await update($, turn, t => ({ ...normalize(DEFAULT_TURN, t), isReviewing: false }))
@@ -350,7 +353,8 @@ export const register: Register = (on, options) => {
       const advice = adviceLine(back.body)
       if (advice && advice !== a.lastAdvice) await noteAdvice($, cfg, advice)
     } else if (e.text) {
-      const p = promptLine(e.text)
+      // Masked before the cut, so a key the cut would split is masked whole.
+      const p = promptLine(redact(e.text))
       await say($, p.who, p.text)
     }
     return next(e)
@@ -586,7 +590,8 @@ export const register: Register = (on, options) => {
       id,
       type: e.name ?? e.subagentType,
       model: started.model,
-      description: e.description,
+      // Kept whole for the expanded card, so masked and cleaned here rather than by a cut.
+      description: stripControl(redact(e.description ?? '')),
       spawnedAt: await $.clock.now(),
     }
     // Decided in the write: a resume whose first step already put its card back to running is not logged again.
@@ -632,7 +637,7 @@ export const register: Register = (on, options) => {
       await update($, agents, list =>
         listOf<unknown>(list)
           .map(normalizeCard)
-          .map(c => (c.id === id ? { ...c, status, endedAt: now, answer: shorten(e.answer, 400) } : c)),
+          .map(c => (c.id === id ? { ...c, status, endedAt: now, answer: shorten(redact(e.answer), 400) } : c)),
       )
       // This run's own length: a resumed agent's card clock also spans the idle time between runs.
       const took = fmtDuration(e.durationMs)
@@ -993,7 +998,7 @@ export const register: Register = (on, options) => {
 
     const agentsPanel = (w: number) => {
       // Cards need 20 columns each; when the pane can't hold the limit, lanes take over.
-      const fit = Math.max(1, Math.min(cfg.maxCards, Math.floor((w + 1) / 21)))
+      const fit = cardsFit(w, cfg.maxCards)
       const useLanes = cards.length > fit
       const isNarrow = w < 40
       const header = (
@@ -1223,24 +1228,31 @@ export const register: Register = (on, options) => {
                   : logPanel(w)
 
     // Panels with the flow between them; the agents panel draws its own rails.
-    const column = (ps: Panel[], w: number) => (
-      <Box flexDirection="column" width={w}>
-        {ps.map((p, i) => {
-          const prev = ps[i - 1]
-          const link =
-            i === 0 || p === 'agents' || prev === 'agents' || p === 'log' || p === 'loops' || prev === 'loops'
-              ? null
-              : rail(`link-${p}`, p === 'architect' ? advising : m.isRunning, p === 'architect' ? C.arch : C.main, w)
-          return (
-            <Box flexDirection="column">
-              {link}
-              {draw(p, w)}
-              {p === 'agents' ? expandedPanel(w) : null}
-            </Box>
-          )
-        })}
-      </Box>
-    )
+    const column = (ps: Panel[], w: number) => {
+      // The agents panel only ends in a downward merge rail as stacked cards with none expanded. As
+      // swimlanes, or with a card expanded below them, it ends on a plain box, so the panel after it
+      // needs the same connector every other box gets rather than butting straight against it.
+      // The log's row budget (`used`) has a spare row for lanes; an expanded card's rows are estimated there anyway.
+      const agentsEndsConnected = cards.length <= cardsFit(w, cfg.maxCards) && !expandedCard
+      return (
+        <Box flexDirection="column" width={w}>
+          {ps.map((p, i) => {
+            const prev = ps[i - 1]
+            const link =
+              i === 0 || p === 'agents' || (prev === 'agents' && agentsEndsConnected) || p === 'log' || p === 'loops' || prev === 'loops'
+                ? null
+                : rail(`link-${p}`, p === 'architect' ? advising : m.isRunning, p === 'architect' ? C.arch : C.main, w)
+            return (
+              <Box flexDirection="column">
+                {link}
+                {draw(p, w)}
+                {p === 'agents' ? expandedPanel(w) : null}
+              </Box>
+            )
+          })}
+        </Box>
+      )
+    }
 
     // Desktop draws the agents' time axis as SVG under the panels.
     const svgLanes =
