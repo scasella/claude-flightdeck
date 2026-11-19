@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.2
 
 - The panel below the agents, the turn receipt, keeps its connector when the agents draw as swimlanes or a card is expanded below them, rather than sitting flush against them. Stacked cards still lead into it with their own merge rail. ([#32](https://github.com/scasella/claude-flightdeck/pull/32), thanks @prabhuSub)
 - More credentials are masked before anything is stored: AWS access key ids, Google API keys, JWTs, Atlassian API tokens, `ghu_` and `ghr_` GitHub tokens, PEM private keys, JSON-quoted keys (`{"password":"…"}`) and quoted flag values (`--password "two words"`). The start of your prompt in the session log, an agent's task and answer, and the architect's advice are masked too; until now only tool inputs were. ([#35](https://github.com/scasella/claude-flightdeck/pull/35), thanks @ai94iq)
