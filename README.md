@@ -76,7 +76,7 @@ Connectors animate only while work flows: a turn is running, an agent is running
 | Command | Does |
 | --- | --- |
 | `/flightdeck` | open the pane |
-| `/flightdeck close` | close it |
+| `/flightdeck close` | close it; so does the pane's own `× close` button, at the end of its first row |
 | `/flightdeck reset` | clear agents, checks, consults, log and the turn (cost, rate limits and compactions stay) |
 | `/flightdeck layout auto\|compact\|wide\|mini` | override the layout for this session |
 
@@ -86,6 +86,7 @@ Focus the pane with `ctrl+x tab`, then:
 | --- | --- |
 | `1`, `2`, … | expand an agent card or lane: its full task, last 3 tool calls, start of its answer |
 | `f` `s` `o` | open the gate's file / shell / other drill-down: the last 5 checks and their verdicts |
+| `x` | close the pane, as `/flightdeck close` |
 
 `/clear` resets the pane along with the conversation.
 
